@@ -1,0 +1,12 @@
+beautifulsoup4
+certifi
+charset-normalizer
+greenlet
+idna
+playwright
+pyee
+requests
+soupsieve
+typing_extensions
+urllib3
+wcwidth

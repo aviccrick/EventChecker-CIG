@@ -1,0 +1,16 @@
+.DS_Store
+
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+.vscode/
+
+reports/
+report/
+*.log
+
+crick_talk_data_extract.json
+crick_talk_data_extract*.json
