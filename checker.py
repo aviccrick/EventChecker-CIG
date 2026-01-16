@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 import re
 from difflib import SequenceMatcher
 from typing import Dict, List, Tuple, Set, Optional, Any
+import itertools
 
 import requests
 from bs4 import BeautifulSoup
@@ -730,13 +731,69 @@ def build_external_found_by_group(
 
 
 # ---------------------------
+# Cross-date speaker lookup
+# ---------------------------
+def build_global_speaker_lookup(
+    found_map: Dict[Tuple[str, str], List[Dict[str, str]]]
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Build a lookup of all speakers across all dates for cross-date matching.
+    
+    Returns a dict keyed by normalized speaker name, with list of entries containing
+    date_iso, category, and original item data.
+    """
+    lookup: Dict[str, List[Dict[str, Any]]] = {}
+    for (date_iso, category), items in found_map.items():
+        for item in items:
+            speaker_norm = norm_text(item.get("speaker", ""))
+            if speaker_norm:
+                if speaker_norm not in lookup:
+                    lookup[speaker_norm] = []
+                lookup[speaker_norm].append({
+                    "date_iso": date_iso,
+                    "category": category,
+                    **item
+                })
+    return lookup
+
+
+def build_external_website_lookup(
+    seminars: List[Dict[str, Any]]
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Build a lookup of external website seminars by normalized speaker name."""
+    lookup: Dict[str, List[Dict[str, Any]]] = {}
+    for s in seminars:
+        speaker = str(s.get("speaker_name", "")).strip()
+        speaker_norm = norm_text(speaker)
+        if not speaker_norm:
+            continue
+        if speaker_norm not in lookup:
+            lookup[speaker_norm] = []
+        lookup[speaker_norm].append(s)
+    return lookup
+
+
+# ---------------------------
 # Comparison model for report
 # ---------------------------
 def build_comparison_rows(
     expected_items: List[Dict[str, str]],
     found_items: List[Dict[str, str]],
     source_label: str = "CrickNet",
+    current_date: str = "",
+    cricknet_speaker_lookup: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+    spreadsheet_speaker_lookup: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+    external_website_lookup: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Build comparison rows between expected (spreadsheet) and found (CrickNet) items.
+    
+    Args:
+        expected_items: Items from spreadsheet for this date
+        found_items: Items from CrickNet for this date  
+        source_label: Label for the source (e.g., "CrickNet")
+        current_date: Current date being compared (ISO format)
+        cricknet_speaker_lookup: All CrickNet speakers across all dates (for checking missing)
+        spreadsheet_speaker_lookup: All spreadsheet speakers across all dates (for checking extras)
+    """
     got_keys = {x["key"] for x in found_items if "key" in x}
     exp_keys = {x["key"] for x in expected_items if "key" in x}
 
@@ -745,27 +802,70 @@ def build_comparison_rows(
 
     rows: List[Dict[str, Any]] = []
     any_mismatch = False
+    
+    # Lists to collect detail info for summary
+    date_mismatches_summary: List[Dict[str, Any]] = []
+    truly_missing: List[str] = []
+    truly_extra: List[str] = []
 
+    def check_external(speaker_name: str) -> Optional[str]:
+        if not external_website_lookup:
+            return None
+        norm_s = norm_text(speaker_name)
+        if not norm_s:
+            return None
+        
+        matches = external_website_lookup.get(norm_s)
+        if not matches:
+            return "Missing from external website"
+        
+        # Check if present on current date
+        for m in matches:
+            if m.get("date_iso") == current_date:
+                return None # Present on correct date
+        
+        # Present but different date
+        other_dates = sorted({m.get("date_iso", "") for m in matches if m.get("date_iso")})
+        if other_dates:
+             return f"On external website for {', '.join(other_dates)}"
+        return "Missing from external website (no date)"
+
+    # 1. Exact matches
+    unmatched_expected = []
     for e in expected_items:
         e_key = e.get("key", "")
         e_disp = display_item(e)
-        candidates = [g for g in found_items if g.get("key") not in consumed_got]
-
+        
         if e_key in got_key_set:
+            note = f"Scheduled on {source_label}"
+            ext_msg = check_external(e.get("speaker", ""))
+            if ext_msg:
+                note += f"; {ext_msg}"
+
             rows.append({
                 "status": "ok",
                 "icon": "✅",
                 "expected": e_disp,
                 "found": e_disp,
-                "note": f"Scheduled on {source_label}",
+                "note": note,
                 "score": None,
             })
             consumed_got.add(e_key)
-            continue
+        else:
+            unmatched_expected.append(e)
 
+    # 2. Fuzzy matches from remainders
+    still_unmatched_expected = []
+    for e in unmatched_expected:
+        e_key = e.get("key", "")
+        e_disp = display_item(e)
+        candidates = [g for g in found_items if g.get("key") not in consumed_got]
+        
         best, score = best_fuzzy_match(e_key, {g.get("key") for g in candidates if g.get("key")})
         used_speaker_fallback = False
+        
         if not (best and score >= MIN_FUZZY_SCORE):
+            # Try speaker-only match
             target_speaker = norm_text(e.get("speaker", ""))
             best = None
             score = 0.0
@@ -778,62 +878,210 @@ def build_comparison_rows(
                 if sc > score:
                     score = sc
                     best = g_key
-            used_speaker_fallback = True
+            if best and score >= MIN_FUZZY_SCORE:
+                used_speaker_fallback = True
 
         if best and score >= MIN_FUZZY_SCORE:
             best_disp = next((display_item(g) for g in found_items if g.get("key") == best), best)
+            
             note = f"Closest match on {source_label}"
-            if used_speaker_fallback:
-                note = f"Closest match on {source_label} (speaker)"
+            status = "warn"
+            icon = "⚠️"
+            
+            if used_speaker_fallback and score >= 1.0:
+                 note = f"Scheduled on {source_label}"
+                 status = "ok"
+                 icon = "✅"
+            elif used_speaker_fallback:
+                 note = f"Closest match on {source_label} (speaker)"
+
+            best_item = next((g for g in found_items if g.get("key") == best), {})
+            ext_msg = check_external(best_item.get("speaker", ""))
+            if ext_msg:
+                note += f"; {ext_msg}"
+                if status == "ok": # Downgrade OK if external issue? User said "flagged".
+                    status = "warn"
+                    icon = "⚠️"
+
             rows.append({
-                "status": "warn",
-                "icon": "⚠️",
+                "status": status,
+                "icon": icon,
                 "expected": e_disp,
                 "found": best_disp,
                 "note": note,
                 "score": round(score * 100),
             })
-            any_mismatch = True
+            if status != "ok":
+                any_mismatch = True
             consumed_got.add(best)
         else:
-            rows.append({
-                "status": "bad",
-                "icon": "❌",
-                "expected": e_disp,
-                "found": "(none)",
-                "note": f"Not been scheduled on {source_label}",
-                "score": None,
-            })
-            any_mismatch = True
+            still_unmatched_expected.append(e)
 
+    # 3. Analyze leftovers for Date Mismatches
+    
+    # Remaining Expected items (potential missing or date mismatch)
+    missing_analysis = []
+    for e in still_unmatched_expected:
+        e_disp = display_item(e)
+        e_speaker_norm = norm_text(e.get("speaker", ""))
+        
+        found_on_other_date = None
+        if cricknet_speaker_lookup and e_speaker_norm:
+            other_entries = cricknet_speaker_lookup.get(e_speaker_norm, [])
+            for entry in other_entries:
+                if entry.get("date_iso") != current_date:
+                    found_on_other_date = entry
+                    break
+        
+        if found_on_other_date:
+            other_date = found_on_other_date.get("date_iso", "")
+            missing_analysis.append({
+                "item": e,
+                "disp": e_disp,
+                "type": "date_mismatch",
+                "other_date": other_date,
+                "note": f"Scheduled on {other_date} on {source_label}"
+            })
+            date_mismatches_summary.append({
+                "speaker": e_disp,
+                "expected_date": current_date,
+                "actual_date": other_date,
+                "direction": "spreadsheet_to_cricknet"
+            })
+        else:
+            missing_analysis.append({
+                "item": e,
+                "disp": e_disp,
+                "type": "missing",
+                "note": f"Not scheduled on {source_label}"
+            })
+            truly_missing.append(e_disp)
+
+    # Remaining Found items (potential extra or date mismatch)
     extras = [g for g in found_items if g.get("key") not in consumed_got]
+    extra_analysis = []
     for x in extras:
+        x_disp = display_item(x)
+        x_speaker_norm = norm_text(x.get("speaker", ""))
+        
+        found_on_spreadsheet_other_date = None
+        if spreadsheet_speaker_lookup and x_speaker_norm:
+            other_entries = spreadsheet_speaker_lookup.get(x_speaker_norm, [])
+            for entry in other_entries:
+                if entry.get("date_iso") != current_date:
+                    found_on_spreadsheet_other_date = entry
+                    break
+        
+        if found_on_spreadsheet_other_date:
+            spreadsheet_date = found_on_spreadsheet_other_date.get("date_iso", "")
+            extra_analysis.append({
+                "item": x,
+                "disp": x_disp,
+                "type": "date_mismatch",
+                "other_date": spreadsheet_date,
+                "note": f"Expected on {spreadsheet_date} per spreadsheet"
+            })
+            date_mismatches_summary.append({
+                "speaker": x_disp,
+                "expected_date": spreadsheet_date,
+                "actual_date": current_date,
+                "direction": "cricknet_to_spreadsheet"
+            })
+        else:
+            extra_analysis.append({
+                "item": x,
+                "disp": x_disp,
+                "type": "extra",
+                "note": ""
+            })
+            truly_extra.append(x_disp)
+
+    # 4. Pair up and create rows
+    # We zip the lists. If one is longer, we handle leftovers.
+    import itertools
+    for m, x in itertools.zip_longest(missing_analysis, extra_analysis):
         any_mismatch = True
+        
+        # Prepare row data
+        e_disp = m["disp"] if m else "(extra on CrickNet)"
+        f_disp = x["disp"] if x else "(none)"
+        
+        # Determine status and note
+        status = "bad" # default
+        icon = "❌"
+        note_parts = []
+        
+        is_date_mismatch = False
+        
+        if m:
+            if m["type"] == "date_mismatch":
+                is_date_mismatch = True
+                note_parts.append("Date mismatch")
+            elif m["type"] == "missing":
+                pass # Status bad
+        
+        if x:
+            if x["type"] == "date_mismatch":
+                is_date_mismatch = True
+                if "Date mismatch" not in note_parts:
+                    note_parts.append("Date mismatch")
+            
+            # Check external consistency for the Found item
+            ext_msg = check_external(x["item"].get("speaker", ""))
+            if ext_msg:
+                note_parts.append(ext_msg)
+            
+            elif x["type"] == "extra":
+                if not m:
+                    status = "extra"
+                    icon = "➕"
+        
+        if is_date_mismatch:
+            status = "date_mismatch" # Maps to Check
+            icon = "📅"
+        elif m and not x:
+             status = "bad"
+             icon = "❌"
+             note_parts.append(m["note"])
+        elif x and not m:
+             status = "extra"
+             icon = "➕"
+        elif m and x:
+             # Paired Missing + Extra (checking slot mismatch)
+             # If neither is officially a date mismatch, treat as a generic mismatch/warn
+             if not is_date_mismatch:
+                 status = "warn"
+                 icon = "⚠️"
+                 note_parts.append(f"Mismatch on {source_label}")
+
+        # Improve note for combined row
+        # If we have both, combine notes?
+        # User wants "Found: Sunaina" (Extra) next to "Expected: Giampietro" (Missing)
+        
         rows.append({
-            "status": "extra",
-            "icon": "➕",
-            "expected": f"(extra on {source_label})",
-            "found": display_item(x),
-            "note": "",
-            "score": None,
+            "status": status,
+            "icon": icon,
+            "expected": m["disp"] if m else "", # Empty string or explicit label? User screenshot shows blank expected for extra
+            "found": x["disp"] if x else "",
+            "note": "; ".join(note_parts) if note_parts else "",
+            "score": None
         })
 
-    missing_exact = sorted(list(exp_keys - got_keys))
-    extras_exact = sorted(list(got_keys - exp_keys))
+
 
     likely_pairs: List[Dict[str, Any]] = []
-    if len(missing_exact) == 1 and len(extras_exact) == 1:
-        m = missing_exact[0]
-        e = extras_exact[0]
+    # Only show likely pairs if there are true missing/extras (not date mismatches)
+    if len(truly_missing) == 1 and len(truly_extra) == 1:
+        m = truly_missing[0]
+        e = truly_extra[0]
         sc = similarity(m, e)
-        m_disp = next((display_item(x) for x in expected_items if x.get("key") == m), m)
-        e_disp = next((display_item(x) for x in found_items if x.get("key") == e), e)
-        likely_pairs.append({"a": m_disp, "b": e_disp, "score": round(sc * 100)})
+        likely_pairs.append({"a": m, "b": e, "score": round(sc * 100)})
 
     summary = {
         "any_mismatch": any_mismatch,
-        "missing_exact": [next((display_item(x) for x in expected_items if x.get("key") == k), k) for k in missing_exact],
-        "extras_exact": [next((display_item(x) for x in found_items if x.get("key") == k), k) for k in extras_exact],
+        "missing_exact": truly_missing, 
+        "date_mismatches": date_mismatches_summary,
+        "extras_exact": truly_extra,
         "likely_pairs": likely_pairs,
     }
     return rows, summary
@@ -1099,10 +1347,12 @@ def render_report_html(report: Dict[str, Any]) -> str:
             return "badge badge-warning"
         if status == "bad":
             return "badge badge-error"
+        if status == "date_mismatch":
+            return "badge badge-warning"  # Amber/orange for date mismatch
         return "badge"
 
     def status_label(status: str) -> str:
-        return {"ok": "OK", "warn": "Check", "bad": "Missing", "extra": "Extra"}.get(status, status)
+        return {"ok": "OK", "warn": "Check", "bad": "Missing", "extra": "Extra", "date_mismatch": "Check"}.get(status, status)
 
     group_palette = {
         "cancer": "var(--col-blue)",
@@ -1299,7 +1549,7 @@ def render_report_html(report: Dict[str, Any]) -> str:
                 any_mismatch = bool(s.get("any_mismatch"))
                 rows_list = s.get("rows", [])
                 has_missing = any(r.get("status") == "bad" for r in rows_list)
-                has_check = any(r.get("status") in {"warn", "extra"} for r in rows_list)
+                has_check = any(r.get("status") in {"warn", "extra", "date_mismatch"} for r in rows_list)
                 box_class = "border border-base-200 rounded-xl p-4 bg-base-100 shadow-sm"
                 
                 # Header Badge Logic
@@ -1332,6 +1582,7 @@ def render_report_html(report: Dict[str, Any]) -> str:
                     """)
 
                 missing_list = s.get("missing", [])
+                date_mismatches_list = s.get("date_mismatches", [])
                 extra_list = s.get("extras", [])
                 likely = s.get("likely_pairs", [])
 
@@ -1350,6 +1601,29 @@ def render_report_html(report: Dict[str, Any]) -> str:
                                 </div>
                                 <a href="{html_escape(mailto_missing)}" class="btn btn-xs btn-outline btn-error bg-white">Draft Email</a>
                             </div>
+                          </div>
+                        """)
+                    if date_mismatches_list:
+                        # Build different messages based on mismatch direction
+                        dm_lines = []
+                        for dm in date_mismatches_list:
+                            speaker = html_escape(dm.get('speaker', ''))
+                            direction = dm.get('direction', '')
+                            if direction == 'cricknet_to_spreadsheet':
+                                # Speaker appears on CrickNet for this date, but spreadsheet says different date
+                                spreadsheet_date = dm.get('expected_date', '')
+                                dm_lines.append(f"<li>{speaker} is scheduled for <strong>{html_escape(spreadsheet_date)}</strong> on spreadsheet, but appears here on {source_label}</li>")
+                            else:
+                                # Speaker on spreadsheet for this date, but CrickNet shows different date  
+                                cricknet_date = dm.get('actual_date', '')
+                                dm_lines.append(f"<li>{speaker} is on the spreadsheet for this date, but scheduled for <strong>{html_escape(cricknet_date)}</strong> on {source_label}</li>")
+                        
+                        detail_parts.append(f"""
+                          <div class="mt-3 detail-block p-3 bg-amber-50 rounded-lg border border-amber-200" data-detail="date-mismatch">
+                            <div class="font-semibold text-amber-800 text-sm">📅 Date mismatch:</div>
+                            <ul class="list-disc ml-6 text-sm text-amber-900 mt-1">
+                              {''.join(dm_lines)}
+                            </ul>
                           </div>
                         """)
                     if extra_list:
@@ -2132,12 +2406,13 @@ def render_report_html(report: Dict[str, Any]) -> str:
           selected.add("bad");
         }} else if (input.value === "check") {{
           selected.add("warn");
+          selected.add("date_mismatch");
         }} else {{
           selected.add(input.value);
         }}
       }});
       if (selected.size === 0) {{
-        ["ok", "warn", "bad", "extra"].forEach((st) => selected.add(st));
+        ["ok", "warn", "bad", "extra", "date_mismatch"].forEach((st) => selected.add(st));
       }}
       return selected;
     }}
@@ -2240,6 +2515,8 @@ def render_report_html(report: Dict[str, Any]) -> str:
               allow = showExtra;
             }} else if (detailType === "likely") {{
               allow = showCheck || showExtra;
+            }} else if (detailType === "date-mismatch") {{
+              allow = showCheck;
             }}
             block.classList.toggle("is-hidden", !allow || !rowVisible);
           }});
@@ -2438,10 +2715,12 @@ def run_once(headless: bool, interactive: bool) -> Tuple[bool, bool]:
 
         external_found_by_group: Dict[str, Dict[str, List[Dict[str, str]]]] = {}
         external_scrape_ok = False
+        global_external_lookup: Dict[str, List[Dict[str, Any]]] = {}
         try:
             print("Scraping external seminars from crick.ac.uk...")
             external_seminars = scrape_external_seminars()
             external_found_by_group = build_external_found_by_group(external_seminars)
+            global_external_lookup = build_external_website_lookup(external_seminars)
             external_scrape_ok = True
             print(f"✅ External website seminars scraped: {len(external_seminars)}")
         except Exception:
@@ -2467,6 +2746,10 @@ def run_once(headless: bool, interactive: bool) -> Tuple[bool, bool]:
             # Found
             events = scrape_interest_group_events(page, events_url)
             found_map = build_found_map(events)
+            
+            # Build speaker lookups for cross-date matching
+            cricknet_speaker_lookup = build_global_speaker_lookup(found_map)
+            spreadsheet_speaker_lookup = build_global_speaker_lookup(expected_map)
 
             # We want to iterate by all (date, category) keys
             all_keys = sorted(set(expected_map.keys()) | set(found_map.keys()))
@@ -2480,17 +2763,26 @@ def run_once(headless: bool, interactive: bool) -> Tuple[bool, bool]:
                 if not exp_items and not got_items:
                     continue
 
-                rows, summary = build_comparison_rows(exp_items, got_items, source_label="CrickNet")
+                rows, summary = build_comparison_rows(
+                    exp_items, got_items, 
+                    source_label="CrickNet",
+                    current_date=d,
+                    cricknet_speaker_lookup=cricknet_speaker_lookup,
+                    spreadsheet_speaker_lookup=spreadsheet_speaker_lookup,
+                    external_website_lookup=(global_external_lookup if cat == "External" else None)
+                )
 
                 # Title shown in report: we keep it simple
                 title = "Interest group seminar"
 
                 missing = summary.get("missing_exact", [])
+                date_mismatches = summary.get("date_mismatches", [])
                 extras = summary.get("extras_exact", [])
                 likely_pairs = summary.get("likely_pairs", [])
                 any_mismatch = bool(summary.get("any_mismatch", False))
 
                 has_missing = bool(missing)
+                has_date_mismatch = bool(date_mismatches)
 
                 section = {
                     "date_iso": d,
@@ -2500,7 +2792,9 @@ def run_once(headless: bool, interactive: bool) -> Tuple[bool, bool]:
                     "rows": rows,
                     "any_mismatch": any_mismatch,
                     "has_missing": has_missing,
+                    "has_date_mismatch": has_date_mismatch,
                     "missing": missing,
+                    "date_mismatches": date_mismatches,
                     "extras": extras,
                     "likely_pairs": likely_pairs,
                     "source_label": "CrickNet",
@@ -2526,6 +2820,18 @@ def run_once(headless: bool, interactive: bool) -> Tuple[bool, bool]:
                         external_expected[d] = items
 
                 external_found = external_found_by_group.get(json_name, {})
+                
+                # Build speaker lookups for external website cross-date matching
+                # Convert simple date -> items dict to (date, category) -> items format
+                external_expected_map: Dict[Tuple[str, str], List[Dict[str, str]]] = {
+                    (d, "External"): items for d, items in external_expected.items()
+                }
+                external_found_map: Dict[Tuple[str, str], List[Dict[str, str]]] = {
+                    (d, "External"): items for d, items in external_found.items()
+                }
+                external_spreadsheet_lookup = build_global_speaker_lookup(external_expected_map)
+                external_website_lookup = build_global_speaker_lookup(external_found_map)
+                
                 external_dates = sorted(set(external_expected.keys()) | set(external_found.keys()))
                 for d in external_dates:
                     exp_items = external_expected.get(d, [])
@@ -2533,8 +2839,15 @@ def run_once(headless: bool, interactive: bool) -> Tuple[bool, bool]:
                     if not exp_items and not got_items:
                         continue
 
-                    rows, summary = build_comparison_rows(exp_items, got_items, source_label="crick.ac.uk")
+                    rows, summary = build_comparison_rows(
+                        exp_items, got_items, 
+                        source_label="crick.ac.uk",
+                        current_date=d,
+                        cricknet_speaker_lookup=external_website_lookup,  # Use website lookup for "missing" check
+                        spreadsheet_speaker_lookup=external_spreadsheet_lookup  # Use spreadsheet lookup for "extras" check
+                    )
                     missing = summary.get("missing_exact", [])
+                    date_mismatches = summary.get("date_mismatches", [])
                     extras = summary.get("extras_exact", [])
                     likely_pairs = summary.get("likely_pairs", [])
                     any_mismatch = bool(summary.get("any_mismatch", False))
@@ -2548,7 +2861,9 @@ def run_once(headless: bool, interactive: bool) -> Tuple[bool, bool]:
                         "rows": rows,
                         "any_mismatch": any_mismatch,
                         "has_missing": has_missing,
+                        "has_date_mismatch": bool(date_mismatches),
                         "missing": missing,
+                        "date_mismatches": date_mismatches,
                         "extras": extras,
                         "likely_pairs": likely_pairs,
                         "source_label": "crick.ac.uk",
