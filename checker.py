@@ -72,6 +72,18 @@ PRIORITY_WINDOW_DAYS = 14
 
 # SharePoint JSON export (produced by Power Automate)
 SHAREPOINT_SITE = "https://thefranciscrickinstitute.sharepoint.com"
+SHAREPOINT_TRIGGER_FOLDER_URL = (
+    "https://thefranciscrickinstitute.sharepoint.com/sites/"
+    "ScienceOperationsAdministration/Shared%20Documents/Forms/AllItems.aspx"
+    "?id=/sites/ScienceOperationsAdministration/Shared%20Documents/Interest%20Groups/"
+    "IG%20Oversight/Trigger&viewid=e732c5a8-f9c6-4fad-808e-2b431d730a69"
+)
+
+# 1. Update this path to match your folder structure exactly
+TRIGGER_FOLDER_REL_PATH = "/sites/ScienceOperationsAdministration/Shared Documents/Interest Groups/IG Oversight/Trigger"
+TRIGGER_FILENAME = "trigger.txt"
+
+# 2. Keep your existing download path, but ensure it matches the user URL provided
 SHAREPOINT_SERVER_RELATIVE_PATH = (
     "/sites/ScienceOperationsAdministration/Shared Documents/"
     "Interest Groups/IG Oversight/crick_talk_data_extract.json"
@@ -508,7 +520,8 @@ def ensure_logged_in(page, interactive: bool) -> bool:
 
 
 def ensure_sharepoint_logged_in(page, interactive: bool) -> bool:
-    page.goto(SHAREPOINT_SITE, wait_until="domcontentloaded")
+    target_site = SHAREPOINT_TRIGGER_FOLDER_URL
+    page.goto(target_site, wait_until="domcontentloaded")
     url = page.url.lower()
     if "login.microsoftonline.com" in url or "_forms/default.aspx" in url or "login" in url:
         if not interactive:
@@ -516,7 +529,35 @@ def ensure_sharepoint_logged_in(page, interactive: bool) -> bool:
         print("SharePoint login required.")
         print("Please complete the Microsoft/Crick sign-in in the opened browser window.")
         input("When you can see the SharePoint site, press Enter here...")
+        page.goto(target_site, wait_until="domcontentloaded")
     return True
+
+
+def get_sharepoint_request_digest(context) -> Optional[str]:
+    contextinfo_url = (
+        f"{SHAREPOINT_SITE}/sites/ScienceOperationsAdministration/_api/contextinfo"
+    )
+    try:
+        resp = context.request.post(
+            contextinfo_url,
+            headers={"accept": "application/json;odata=verbose"},
+        )
+    except Exception:
+        return None
+
+    if not resp.ok:
+        return None
+
+    try:
+        payload = resp.json()
+    except Exception:
+        return None
+
+    return (
+        payload.get("d", {})
+        .get("GetContextWebInformation", {})
+        .get("FormDigestValue")
+    )
 
 
 def download_sharepoint_json(context, page, interactive: bool) -> bool:
@@ -2662,6 +2703,97 @@ def write_report_files(report_html: str) -> Tuple[str, str]:
 
     stamped_path.write_text(report_html, encoding="utf-8")
     latest_path.write_text(report_html, encoding="utf-8")
+    return str(latest_path), str(stamped_path)
+
+def fetch_fresh_data_via_trigger(context, page, interactive: bool) -> bool:
+    """
+    1. Uploads a dummy file to trigger Power Automate.
+    2. Waits for the JSON file to update (by checking the 'lastUpdated' field).
+    3. Downloads the fresh JSON.
+    """
+    print("Starting Data Refresh Sequence...")
+    
+    # 1. Ensure we are logged in so we can get the security token
+    if not ensure_sharepoint_logged_in(page, interactive=interactive):
+        return False
+
+    # 2. Get the Request Digest via SharePoint contextinfo (no DOM scraping)
+    digest = get_sharepoint_request_digest(context)
+    if not digest:
+        print("❌ Failed to get security token. Cannot trigger flow.")
+        return False
+
+    # 3. Get the OLD timestamp (so we know when it changes)
+    old_timestamp = ""
+    if Path(LOCAL_JSON_PATH).exists():
+        try:
+            old_data = json.loads(Path(LOCAL_JSON_PATH).read_text(encoding="utf-8"))
+            old_timestamp = old_data.get("lastUpdated", "")
+            print(f"   Current Data Timestamp: {old_timestamp}")
+        except:
+            pass
+
+    # 4. Upload 'trigger.txt' (Overwriting the old one)
+    # We put the current time in the file so the checksum always changes
+    trigger_content = f"Triggered by Python at {datetime.now().isoformat()}"
+    
+    # SharePoint REST API endpoint for file creation
+    # Note the 'overwrite=true' flag - this replaces the old file automatically
+    upload_url = (
+        f"{SHAREPOINT_SITE}/sites/ScienceOperationsAdministration/_api/web"
+        f"/GetFolderByServerRelativeUrl('{TRIGGER_FOLDER_REL_PATH}')"
+        f"/Files/add(url='{TRIGGER_FILENAME}',overwrite=true)"
+    )
+
+    print(f"   Uploading trigger file to: {TRIGGER_FILENAME}...")
+    resp = context.request.post(
+        upload_url,
+        headers={
+            "accept": "application/json;odata=verbose",
+            "content-type": "text/plain",
+            "X-RequestDigest": digest
+        },
+        data=trigger_content
+    )
+
+    if not resp.ok:
+        print(f"❌ Trigger upload failed: {resp.status} {resp.status_text}")
+        return False
+    
+    print("✅ Trigger uploaded! Waiting for Power Automate (this takes ~1-2 mins)...")
+
+    # 5. POLLING LOOP: Wait for the JSON to update
+    # We check every 10 seconds for up to 3 minutes (18 attempts)
+    max_retries = 18 
+    for i in range(max_retries):
+        time.sleep(10) # Wait 10 seconds
+        
+        print(f"   Checking for updates (Attempt {i+1}/{max_retries})...")
+        
+        # Try to download the JSON
+        dl_resp = context.request.get(
+            SHAREPOINT_DOWNLOAD_URL,
+            headers={"accept": "application/json"},
+        )
+        
+        if dl_resp.ok:
+            new_content = dl_resp.body()
+            try:
+                new_json = json.loads(new_content)
+                new_timestamp = new_json.get("lastUpdated", "")
+                
+                # Compare timestamps
+                if new_timestamp != old_timestamp:
+                    print(f"✅ Fresh data detected! (Timestamp: {new_timestamp})")
+                    Path(LOCAL_JSON_PATH).write_bytes(new_content)
+                    return True
+            except:
+                pass # JSON might be partial or invalid while writing, just retry
+        
+    print("⚠️  Timed out waiting for data refresh. Using existing data.")
+    return False
+
+
 
     return str(latest_path), str(stamped_path)
 
@@ -2690,8 +2822,10 @@ def run_once(headless: bool, interactive: bool) -> Tuple[bool, bool]:
 
         sharepoint_ok = False
         try:
-            sharepoint_ok = download_sharepoint_json(context, page, interactive=interactive)
-        except Exception:
+            # We now use the smart trigger function
+            sharepoint_ok = fetch_fresh_data_via_trigger(context, page, interactive=interactive)
+        except Exception as e:
+            print(f"❌ Error in refresh process: {e}")
             sharepoint_ok = False
 
         close_extra_tabs(context, page)
