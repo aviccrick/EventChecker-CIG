@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 
 def build_toolbar_html() -> str:
     return """
@@ -32,6 +34,8 @@ def build_toolbar_html() -> str:
 def build_toolbar_script() -> str:
     return """
 <script id="helper-script">
+  let helperCountdownTarget = null;
+  let helperCountdownPaused = false;
   async function post(path, body) {
     const res = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {}) });
     return res.json();
@@ -46,6 +50,43 @@ def build_toolbar_script() -> str:
     badge.textContent = state === "running" ? "Running" : "Idle";
     badge.classList.remove("badge-outline", "badge-warning", "badge-success");
     badge.classList.add(state === "running" ? "badge-warning" : "badge-outline");
+  }
+  function setCountdownValue(el, value) {
+    if (!el) return;
+    const v = Math.max(0, value | 0);
+    el.style.setProperty("--value", v);
+    el.setAttribute("aria-label", String(v));
+    el.textContent = String(v);
+  }
+  function tickHelperCountdown() {
+    const wrap = document.getElementById("helper-next-run-countdown");
+    if (!wrap) return;
+
+    if (!helperCountdownTarget || !Number.isFinite(helperCountdownTarget)) {
+      wrap.innerHTML = helperCountdownPaused ? "<span>Scheduling paused.</span>" : "<span>Not scheduled.</span>";
+      return;
+    }
+
+    const hEl = document.getElementById("helper-cd-hours");
+    const mEl = document.getElementById("helper-cd-mins");
+    const sEl = document.getElementById("helper-cd-secs");
+    if (!hEl || !mEl || !sEl) return;
+
+    const now = Math.floor(Date.now() / 1000);
+    let remaining = helperCountdownTarget - now;
+    if (remaining <= 0) {
+      wrap.innerHTML = "<span>Next run is due.</span>";
+      return;
+    }
+
+    const hours = Math.floor(remaining / 3600);
+    remaining %= 3600;
+    const mins = Math.floor(remaining / 60);
+    const secs = remaining % 60;
+
+    setCountdownValue(hEl, hours);
+    setCountdownValue(mEl, mins);
+    setCountdownValue(sEl, secs);
   }
   async function refreshStatus() {
     const res = await fetch("/status");
@@ -71,6 +112,14 @@ def build_toolbar_script() -> str:
       }
     }
 
+    helperCountdownPaused = Boolean(data.paused);
+    if (data.next_run) {
+      helperCountdownTarget = Math.floor(new Date(data.next_run).getTime() / 1000);
+    } else {
+      helperCountdownTarget = null;
+    }
+    tickHelperCountdown();
+
     if (data.refresh_report) {
       window.location.hash = window.location.hash;
     }
@@ -92,6 +141,7 @@ def build_toolbar_script() -> str:
   }
   refreshStatus();
   setInterval(refreshStatus, 5000);
+  setInterval(tickHelperCountdown, 1000);
 </script>
 """
 
@@ -123,7 +173,33 @@ def inject_toolbar(report_html: str) -> str:
         else:
             html = html + script
 
-    return html
+    return replace_spreadsheet_box(html)
+
+
+def replace_spreadsheet_box(report_html: str) -> str:
+    replacement = """
+    <div class="stat-box bg-white p-4 rounded-lg shadow-sm border border-slate-100">
+      <div class="text-xs uppercase font-bold text-slate-400">Next scheduled run</div>
+      <div class="text-lg font-medium">Next run in</div>
+      <div class="text-xs text-slate-500 mt-1">
+        <span class="mr-2">Next run in</span>
+        <span id="helper-next-run-countdown">
+          <span class="countdown font-mono"><span id="helper-cd-hours" style="--value:0;" aria-live="polite" aria-label="0">0</span></span>h
+          <span class="countdown font-mono ml-2"><span id="helper-cd-mins" style="--value:0;" aria-live="polite" aria-label="0">0</span></span>m
+          <span class="countdown font-mono ml-2"><span id="helper-cd-secs" style="--value:0;" aria-live="polite" aria-label="0">0</span></span>s
+        </span>
+      </div>
+    </div>
+    """
+    pattern = re.compile(
+        r'<div class="stat-box[^>]*>\\s*'
+        r'<div class="text-xs uppercase font-bold text-slate-400">Spreadsheet Data</div>\\s*'
+        r'<div class="text-lg font-medium">.*?</div>\\s*'
+        r'<div class="text-xs text-slate-500 mt-1">.*?</div>\\s*'
+        r'</div>',
+        re.DOTALL,
+    )
+    return pattern.sub(replacement, report_html, count=1)
 
 
 def render_empty_page() -> str:
