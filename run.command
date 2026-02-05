@@ -22,5 +22,6 @@ else
   echo "❌ Report was not generated."
 fi
 
+echo "Tip: You can also use the local helper UI at http://localhost:8765"
 echo "Done. Press Enter to close..."
 read

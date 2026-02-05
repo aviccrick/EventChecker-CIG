@@ -33,12 +33,47 @@ python3 -m pip install -r requirements.txt
 echo "Installing browser..."
 python3 -m playwright install chromium
 
+PLIST="$HOME/Library/LaunchAgents/com.cricknet.checker.plist"
+LOG_DIR="$HOME/Library/Logs"
+mkdir -p "$LOG_DIR"
+
+cat > "$PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.cricknet.checker</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$(pwd)/.venv/bin/python3</string>
+    <string>$(pwd)/helper.py</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>$LOG_DIR/CrickNetChecker.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>$LOG_DIR/CrickNetChecker.err.log</string>
+</dict>
+</plist>
+EOF
+
 chmod +x run.command
+chmod +x start.command
+
+launchctl bootstrap "gui/$UID" "$PLIST" || true
+launchctl kickstart -k "gui/$UID/com.cricknet.checker" || true
 
 echo ""
 echo "------------------------------------------------"
 echo "✅ Setup complete!"
-echo "You can now run 'run.command' to generate reports."
+echo "Open http://localhost:8765 in your browser."
+echo "To stop the helper, click 'Stop helper' in the UI."
+echo "To restart, double-click 'start.command' or log out/in."
+echo "You can still run 'run.command' to generate reports."
 echo "------------------------------------------------"
 echo "Press Enter to exit..."
 read
