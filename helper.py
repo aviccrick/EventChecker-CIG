@@ -17,7 +17,7 @@ from helper_state import (
     DEFAULT_INTERVAL_MINUTES,
 )
 from helper_runner import build_run_command
-from helper_ui import render_index_html
+from helper_ui import inject_toolbar, render_empty_page
 
 REPO_ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = Path.home() / ".cricknet-checker" / "config.json"
@@ -100,7 +100,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if self.path == "/":
-            self._send(200, render_index_html())
+            if REPORT_PATH.exists():
+                html = inject_toolbar(REPORT_PATH.read_text(encoding="utf-8"))
+            else:
+                html = render_empty_page()
+            self._send(200, html)
             return
         if self.path.startswith("/report"):
             if REPORT_PATH.exists():
