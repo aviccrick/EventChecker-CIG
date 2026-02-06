@@ -58,6 +58,25 @@ def build_toolbar_script() -> str:
     el.setAttribute("aria-label", String(v));
     el.textContent = String(v);
   }
+  function formatNextRun(isoString) {
+    if (!isoString) return "—";
+    const dt = new Date(isoString);
+    if (Number.isNaN(dt.getTime())) return isoString;
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    }).formatToParts(dt);
+    const getPart = (type) => {
+      const found = parts.find((part) => part.type === type);
+      return found ? found.value : "";
+    };
+    return `${getPart("weekday")} ${getPart("day")} ${getPart("month")} ${getPart("year")}, ${getPart("hour")}:${getPart("minute")}`;
+  }
   function tickHelperCountdown() {
     const wrap = document.getElementById("helper-next-run-countdown");
     if (!wrap) return;
@@ -94,8 +113,9 @@ def build_toolbar_script() -> str:
 
     setBadge(data.state);
     setText("status-last", `Last: ${data.last_run || "—"}`);
-    setText("status-next", `Next: ${data.next_run || "—"}`);
-    setText("next-run", data.next_run || "—");
+    setText("status-next", `Next: ${formatNextRun(data.next_run)}`);
+    setText("next-run", formatNextRun(data.next_run));
+    setText("helper-next-run", formatNextRun(data.next_run));
 
     const pauseBtn = document.getElementById("pause-btn");
     if (pauseBtn) {
@@ -179,8 +199,8 @@ def inject_toolbar(report_html: str) -> str:
 def replace_spreadsheet_box(report_html: str) -> str:
     replacement = """
     <div class="stat-box bg-white p-4 rounded-lg shadow-sm border border-slate-100">
-      <div class="text-xs uppercase font-bold text-slate-400">Next scheduled run</div>
-      <div class="text-lg font-medium">Next run in</div>
+      <div class="text-xs uppercase font-bold text-slate-400">Next Scheduled Run</div>
+      <div class="text-lg font-medium" id="helper-next-run">—</div>
       <div class="text-xs text-slate-500 mt-1">
         <span class="mr-2">Next run in</span>
         <span id="helper-next-run-countdown">
@@ -192,11 +212,10 @@ def replace_spreadsheet_box(report_html: str) -> str:
     </div>
     """
     pattern = re.compile(
-        r'<div class="stat-box[^>]*>\\s*'
-        r'<div class="text-xs uppercase font-bold text-slate-400">Spreadsheet Data</div>\\s*'
-        r'<div class="text-lg font-medium">.*?</div>\\s*'
-        r'<div class="text-xs text-slate-500 mt-1">.*?</div>\\s*'
-        r'</div>',
+        r'(<div class="stat-box[^>]*>\s*'
+        r'<div class="text-xs uppercase font-bold text-slate-400">Spreadsheet Data</div>\s*'
+        r'.*?'
+        r'</div>\s*)',
         re.DOTALL,
     )
     return pattern.sub(replacement, report_html, count=1)

@@ -25,6 +25,22 @@ class TestHelperUI(unittest.TestCase):
         self.assertIn("id=\"helper-controls\"", combined)
         self.assertIn("id=\"helper-script\"", combined)
 
+    def test_inject_toolbar_replaces_spreadsheet_box(self):
+        from helper_ui import inject_toolbar
+
+        report_html = """
+        <html><body>
+          <div class=\"stat-box bg-white p-4 rounded-lg shadow-sm border border-slate-100\">
+            <div class=\"text-xs uppercase font-bold text-slate-400\">Spreadsheet Data</div>
+            <div class=\"text-lg font-medium\">Refreshed 5th Feb at 16:00</div>
+            <div class=\"text-xs text-slate-500 mt-1\">Next update in 2 hr</div>
+          </div>
+        </body></html>
+        """
+        combined = inject_toolbar(report_html)
+        self.assertIn("Next Scheduled Run", combined)
+        self.assertIn("id=\"helper-next-run\"", combined)
+
     def test_inject_toolbar_does_not_use_iframe(self):
         from helper_ui import inject_toolbar
 
