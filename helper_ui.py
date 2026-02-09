@@ -7,11 +7,11 @@ def build_toolbar_html() -> str:
     return """
 <div id="helper-controls" class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px] gap-4 mb-6">
   <div class="stat-box bg-white p-4 rounded-lg shadow-sm border border-slate-100">
-    <div class="text-xs uppercase font-bold text-slate-400">Helper Controls</div>
+    <div class="text-xs uppercase font-bold text-slate-400">Report & Schedule</div>
     <div class="mt-2 flex flex-wrap gap-2">
-      <button class="btn btn-sm btn-primary" id="run-btn">Run now</button>
-      <button class="btn btn-sm" id="pause-btn">Pause scheduling</button>
-      <button class="btn btn-sm btn-error" id="stop-btn">Stop helper</button>
+      <button class="btn btn-sm btn-primary" id="run-btn">Generate Report</button>
+      <button class="btn btn-sm" id="pause-btn">Pause Scheduled Runs</button>
+      <button class="btn btn-sm btn-error" id="stop-btn">Stop App</button>
     </div>
     <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
       <span class="badge badge-outline" id="state-badge">Idle</span>
@@ -119,7 +119,7 @@ def build_toolbar_script() -> str:
 
     const pauseBtn = document.getElementById("pause-btn");
     if (pauseBtn) {
-      pauseBtn.textContent = data.paused ? "Resume scheduling" : "Pause scheduling";
+      pauseBtn.textContent = data.paused ? "Resume Scheduled Runs" : "Pause Scheduled Runs";
     }
 
     const errorBanner = document.getElementById("error-banner");

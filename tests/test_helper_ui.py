@@ -6,9 +6,10 @@ class TestHelperUI(unittest.TestCase):
         from helper_ui import build_toolbar_html
 
         html = build_toolbar_html()
-        self.assertIn("Run now", html)
-        self.assertIn("Pause scheduling", html)
-        self.assertIn("Stop helper", html)
+        self.assertIn("Generate Report", html)
+        self.assertIn("Pause Scheduled Runs", html)
+        self.assertIn("Stop App", html)
+        self.assertIn("Report & Schedule", html)
 
     def test_inject_toolbar_inserts_controls_and_script(self):
         from helper_ui import inject_toolbar
