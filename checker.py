@@ -2258,12 +2258,74 @@ def render_report_html(report: Dict[str, Any]) -> str:
       z-index: 2;
     }}
 
+    .cal-count {{
+      margin-top: 2px;
+      font-size: 0.65rem;
+      line-height: 1.1;
+      display: grid;
+      gap: 1px;
+      z-index: 2;
+    }}
+
+    .cal-count .count-total {{
+      font-weight: 700;
+      color: var(--text-main);
+    }}
+
+    .cal-count .count-issues {{
+      font-weight: 600;
+      color: #b45309;
+    }}
+
     .cal-dots-row {{
       display: flex;
       gap: 2px;
       margin-top: 2px;
       height: 6px;
       justify-content: center;
+    }}
+
+    .cal-cell.heat-0 {{
+      background: transparent;
+    }}
+
+    .cal-cell.heat-1 {{
+      background: rgba(254, 243, 199, 0.7);
+    }}
+
+    .cal-cell.heat-2 {{
+      background: rgba(253, 230, 138, 0.7);
+    }}
+
+    .cal-cell.heat-3 {{
+      background: rgba(252, 211, 77, 0.7);
+    }}
+
+    .cal-cell.heat-4 {{
+      background: rgba(251, 191, 36, 0.75);
+    }}
+
+    .calendar-tooltip {{
+      position: absolute;
+      left: 50%;
+      bottom: calc(100% + 6px);
+      transform: translateX(-50%) translateY(4px);
+      background: rgba(15, 23, 42, 0.95);
+      color: #fff;
+      padding: 6px 8px;
+      border-radius: 6px;
+      font-size: 0.65rem;
+      line-height: 1.2;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s, transform 0.15s;
+      z-index: 10;
+    }}
+
+    .cal-cell:hover .calendar-tooltip {{
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
     }}
 
     .cal-grid-dot {{
@@ -2904,6 +2966,7 @@ def render_report_html(report: Dict[str, Any]) -> str:
       }});
 
       updateActiveGroup();
+      rebuildCalendarModel();
     }}
 
     if (filterGroup) filterGroup.addEventListener("change", applyFilters);
@@ -3061,15 +3124,132 @@ def render_report_html(report: Dict[str, Any]) -> str:
     let selectedDate = todayStr;
     let currentMonth = new Date(todayObj.getFullYear(), todayObj.getMonth(), 1);
 
-    const eventsByDate = new Map();
-    calendarEventsData.forEach((ev) => {{
-      if (!ev || !ev.date_iso) return;
-      const list = eventsByDate.get(ev.date_iso) || [];
-      list.push(ev);
-      eventsByDate.set(ev.date_iso, list);
-    }});
+    let calendarModel = {{
+      byDate: new Map(),
+      issueDates: [],
+      eventDates: [],
+    }};
 
-    function renderCalendarMonth() {{
+    function blankDateInfo() {{
+      return {{
+        total: 0,
+        ok: 0,
+        missing: 0,
+        check: 0,
+        extra: 0,
+        dateMismatch: 0,
+        issues: 0,
+        groups: new Map(),
+        agenda: [],
+      }};
+    }}
+
+    function addGroupIssue(info, groupLabel) {{
+      if (!groupLabel) return;
+      const prev = info.groups.get(groupLabel) || 0;
+      info.groups.set(groupLabel, prev + 1);
+    }}
+
+    function buildCalendarModel() {{
+      const model = {{
+        byDate: new Map(),
+        issueDates: [],
+        eventDates: [],
+      }};
+      const dateCards = Array.from(document.querySelectorAll(".date-card"));
+      dateCards.forEach((card) => {{
+        if (card.classList.contains("is-hidden")) return;
+        const dateIso = card.getAttribute("data-date") || "";
+        if (!dateIso) return;
+        const groupLabel = card.getAttribute("data-group-label") || card.getAttribute("data-group") || "Group";
+        const groupUrl = card.getAttribute("data-group-url") || "";
+        const category = card.getAttribute("data-category") || "";
+        const anchor = card.getAttribute("id") || "";
+        const titleEl = card.querySelector(".text-sm.font-medium");
+        const cardTitle = titleEl ? titleEl.textContent.trim() : "Agenda item";
+        const rows = Array.from(card.querySelectorAll("tbody tr"));
+
+        rows.forEach((row) => {{
+          if (row.classList.contains("is-hidden")) return;
+          const status = row.getAttribute("data-status") || "";
+          const cells = row.querySelectorAll("td");
+          const expected = cells[1] ? cells[1].textContent.trim() : "";
+          const found = cells[2] ? cells[2].textContent.trim() : "";
+          const note = cells[3] ? cells[3].textContent.trim() : "";
+          const title = expected || found || cardTitle;
+
+          let info = model.byDate.get(dateIso);
+          if (!info) {{
+            info = blankDateInfo();
+            model.byDate.set(dateIso, info);
+          }}
+
+          info.total += 1;
+          if (status === "ok") {{
+            info.ok += 1;
+          }} else if (status === "bad") {{
+            info.missing += 1;
+            addGroupIssue(info, groupLabel);
+          }} else if (status === "warn") {{
+            info.check += 1;
+            addGroupIssue(info, groupLabel);
+          }} else if (status === "date_mismatch") {{
+            info.check += 1;
+            info.dateMismatch += 1;
+            addGroupIssue(info, groupLabel);
+          }} else if (status === "extra") {{
+            info.extra += 1;
+          }}
+
+          info.agenda.push({{
+            date: dateIso,
+            status,
+            title,
+            groupLabel,
+            groupUrl,
+            category,
+            anchor,
+            note,
+          }});
+        }});
+      }});
+
+      model.byDate.forEach((info, dateIso) => {{
+        info.issues = info.missing + info.check;
+        if (info.total > 0) model.eventDates.push(dateIso);
+        if (info.issues > 0) model.issueDates.push(dateIso);
+      }});
+
+      model.eventDates.sort();
+      model.issueDates.sort();
+      return model;
+    }}
+
+    function getHeatClass(issues) {{
+      if (issues <= 0) return "heat-0";
+      if (issues === 1) return "heat-1";
+      if (issues <= 3) return "heat-2";
+      if (issues <= 6) return "heat-3";
+      return "heat-4";
+    }}
+
+    function formatTooltip(info) {{
+      if (!info) return "";
+      const topGroups = Array.from(info.groups.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 2)
+        .map(([name, count]) => `${{name}} (${count})`);
+      const summary = `OK ${info.ok} / Missing ${info.missing} / Check ${info.check} / Extra ${info.extra}`;
+      if (!topGroups.length) return summary;
+      return `${{summary}} · Top: ${{topGroups.join(", ")}}`;
+    }}
+
+    function rebuildCalendarModel() {{
+      calendarModel = buildCalendarModel();
+      renderCalendar();
+    }}
+
+    function renderCalendar() {{
       if (!calendarGrid) return;
       calendarGrid.innerHTML = "";
 
@@ -3114,15 +3294,22 @@ def render_report_html(report: Dict[str, Any]) -> str:
         dayNum.textContent = String(day);
         cell.appendChild(dayNum);
 
-        const dotsRow = document.createElement("div");
-        dotsRow.className = "cal-dots-row";
-        const dayEvents = eventsByDate.get(dateIso) || [];
-        dayEvents.forEach((ev) => {{
-          const dot = document.createElement("span");
-          dot.className = `cal-grid-dot group-${{ev.group_slug}}`;
-          dotsRow.appendChild(dot);
-        }});
-        cell.appendChild(dotsRow);
+        const info = calendarModel.byDate.get(dateIso);
+        if (info && info.total > 0) {{
+          cell.classList.add(getHeatClass(info.issues));
+          const count = document.createElement("div");
+          count.className = "cal-count";
+          const issueLabel = `${{info.missing}}M ${{info.check}}C`;
+          count.innerHTML = `<span class="count-total">${{info.total}}</span><span class="count-issues">${{issueLabel}}</span>`;
+          cell.appendChild(count);
+
+          const tooltip = document.createElement("div");
+          tooltip.className = "calendar-tooltip";
+          tooltip.textContent = formatTooltip(info);
+          cell.appendChild(tooltip);
+        }} else {{
+          cell.classList.add("heat-0");
+        }}
 
         cell.addEventListener("click", () => {{
           filterDate(dateIso);
@@ -3160,23 +3347,24 @@ def render_report_html(report: Dict[str, Any]) -> str:
           calendarEmpty.classList.remove("is-visible");
         }}
       }}
-      renderCalendarMonth();
+      renderCalendar();
     }};
 
     if (calendarPrev) {{
       calendarPrev.addEventListener("click", () => {{
         currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1);
-        renderCalendarMonth();
+        renderCalendar();
       }});
     }}
     if (calendarNext) {{
       calendarNext.addEventListener("click", () => {{
         currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1);
-        renderCalendarMonth();
+        renderCalendar();
       }});
     }}
 
-    renderCalendarMonth();
+    calendarModel = buildCalendarModel();
+    renderCalendar();
     filterDate(todayStr);
 
     applyFilters();

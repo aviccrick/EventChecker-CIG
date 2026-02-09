@@ -12,6 +12,11 @@ class TestCalendarTemplate(unittest.TestCase):
         self.assertIn("calendar-agenda", content)
         self.assertIn("data-report-date", content)
         self.assertIn("data-date=\"", content)
+        self.assertIn("calendarModel", content)
+        self.assertIn("renderCalendar", content)
+        self.assertIn("cal-count", content)
+        self.assertIn("heat-", content)
+        self.assertIn("calendar-tooltip", content)
 
 
 if __name__ == "__main__":
