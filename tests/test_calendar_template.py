@@ -22,6 +22,11 @@ class TestCalendarTemplate(unittest.TestCase):
         self.assertIn("keydown", content)
         self.assertIn("shiftKey", content)
         self.assertIn("ctrlKey", content)
+        self.assertIn("URLSearchParams", content)
+        self.assertIn("history.replaceState", content)
+        self.assertIn("date=", content)
+        self.assertIn("group=", content)
+        self.assertIn("status=", content)
 
 
 if __name__ == "__main__":

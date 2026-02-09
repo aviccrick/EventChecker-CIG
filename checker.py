@@ -2594,7 +2594,7 @@ def render_report_html(report: Dict[str, Any]) -> str:
                   <span>Issues only</span>
                 </label>
                 <label class="calendar-toggle">
-                  <input type="checkbox" class="checkbox checkbox-xs" id="calendar-search-toggle" />
+                  <input type="checkbox" class="checkbox checkbox-xs" id="calendar-search-toggle" checked />
                   <span>Search affects calendar</span>
                 </label>
               </div>
@@ -2934,26 +2934,21 @@ def render_report_html(report: Dict[str, Any]) -> str:
 
         let cardVisible = false;
         dateCards.forEach((dateCard) => {{
-          if (!groupMatch) {{
+          const cardCat = dateCard.getAttribute("data-category") || "";
+          let categoryMatch = true;
+          if (categoryValue !== "all") {{
+            if (categoryValue === "external") {{
+              categoryMatch = cardCat.includes("external");
+            }} else {{
+              categoryMatch = cardCat.includes(categoryValue);
+            }}
+          }}
+
+          const cardMatch = groupMatch && categoryMatch;
+          dateCard.setAttribute("data-card-match", cardMatch ? "1" : "0");
+          if (!cardMatch) {{
             dateCard.classList.add("is-hidden");
             return;
-          }}
-          
-          // Category Filter
-          const cardCat = dateCard.getAttribute("data-category") || "";
-          if (categoryValue !== "all") {{
-             if (categoryValue === "external") {{
-                 // Match "External" or "External website"
-                 if (!cardCat.includes("external")) {{
-                    dateCard.classList.add("is-hidden");
-                    return;
-                 }}
-             }} else {{
-                 if (!cardCat.includes(categoryValue)) {{
-                    dateCard.classList.add("is-hidden");
-                    return;
-                 }}
-             }}
           }}
 
           let rowVisible = false;
@@ -2961,14 +2956,13 @@ def render_report_html(report: Dict[str, Any]) -> str:
           rows.forEach((row) => {{
             const status = row.getAttribute("data-status") || "";
             
-            if (onlyActionable && status === "ok") {{
-                row.classList.add("is-hidden");
-                return;
-            }}
-            
+            const actionableMatch = !(onlyActionable && status === "ok");
             const statusMatch = selectedStatuses.has(status);
             const textMatch = !searchValue || row.textContent.toLowerCase().includes(searchValue);
-            const show = statusMatch && textMatch;
+            const baseMatch = actionableMatch && statusMatch;
+            row.setAttribute("data-match-base", baseMatch ? "1" : "0");
+            row.setAttribute("data-match-search", textMatch ? "1" : "0");
+            const show = baseMatch && textMatch;
             row.classList.toggle("is-hidden", !show);
             if (show) rowVisible = true;
           }});
@@ -3003,6 +2997,7 @@ def render_report_html(report: Dict[str, Any]) -> str:
 
       updateActiveGroup();
       rebuildCalendarModel();
+      updateUrlState();
     }}
 
     if (filterGroup) filterGroup.addEventListener("change", applyFilters);
@@ -3206,7 +3201,10 @@ def render_report_html(report: Dict[str, Any]) -> str:
       }};
       const dateCards = Array.from(document.querySelectorAll(".date-card"));
       dateCards.forEach((card) => {{
-        if (card.classList.contains("is-hidden")) return;
+        const cardMatch = card.getAttribute("data-card-match");
+        const includeSearch = calendarSearchToggle ? calendarSearchToggle.checked : true;
+        if (cardMatch === "0") return;
+        if (includeSearch && card.classList.contains("is-hidden")) return;
         const dateIso = card.getAttribute("data-date") || "";
         if (!dateIso) return;
         const groupLabel = card.getAttribute("data-group-label") || card.getAttribute("data-group") || "Group";
@@ -3218,7 +3216,13 @@ def render_report_html(report: Dict[str, Any]) -> str:
         const rows = Array.from(card.querySelectorAll("tbody tr"));
 
         rows.forEach((row) => {{
-          if (row.classList.contains("is-hidden")) return;
+          const baseMatch = row.getAttribute("data-match-base");
+          const searchMatch = row.getAttribute("data-match-search");
+          const matchesBase = baseMatch !== "0";
+          const matchesSearch = searchMatch !== "0";
+          const includeSearch = calendarSearchToggle ? calendarSearchToggle.checked : true;
+          if (!matchesBase) return;
+          if (includeSearch && !matchesSearch) return;
           const status = row.getAttribute("data-status") || "";
           const cells = row.querySelectorAll("td");
           const expected = cells[1] ? cells[1].textContent.trim() : "";
@@ -3303,6 +3307,7 @@ def render_report_html(report: Dict[str, Any]) -> str:
       updateCalendarEvents(focusDate);
       renderCalendar();
       renderAgenda();
+      updateUrlState();
     }}
 
     function renderCalendar() {{
@@ -3664,6 +3669,96 @@ def render_report_html(report: Dict[str, Any]) -> str:
       calendarViewToggle.textContent = calendarView === "month" ? "Month" : "Week";
     }}
 
+    // URL params: date=YYYY-MM-DD&group=...&status=...&category=...&q=...
+    function updateUrlState() {{
+      const params = new URLSearchParams();
+      if (focusDate) params.set("date", focusDate);
+      if (selectedDates.size > 1) {{
+        params.set("dates", Array.from(selectedDates).sort().join(","));
+      }}
+      if (filterGroup && filterGroup.value && filterGroup.value !== "all") {{
+        params.set("group", filterGroup.value);
+      }}
+      if (filterCategory && filterCategory.value && filterCategory.value !== "all") {{
+        params.set("category", filterCategory.value);
+      }}
+      if (filterSearch && filterSearch.value.trim()) {{
+        params.set("q", filterSearch.value.trim());
+      }}
+      if (statusInputs.length) {{
+        const statuses = statusInputs.filter((input) => input.checked).map((input) => input.value);
+        if (statuses.length && statuses.length !== statusInputs.length) {{
+          params.set("status", statuses.join(","));
+        }}
+      }}
+      if (getActionableState()) params.set("actionable", "1");
+      if (calendarView !== "month") params.set("view", calendarView);
+      if (calendarIssuesOnly && calendarIssuesOnly.checked) params.set("issuesOnly", "1");
+      if (calendarSearchToggle && calendarSearchToggle.checked) params.set("searchCal", "1");
+
+      const qs = params.toString();
+      const nextUrl = qs ? `${{window.location.pathname}}?${{qs}}` : window.location.pathname;
+      history.replaceState(null, "", nextUrl);
+    }}
+
+    function applyUrlState() {{
+      const params = new URLSearchParams(window.location.search);
+      const group = params.get("group");
+      const category = params.get("category");
+      const q = params.get("q");
+      const status = params.get("status");
+      const date = params.get("date");
+      const dates = params.get("dates");
+      const view = params.get("view");
+      const actionable = params.get("actionable");
+      const issuesOnly = params.get("issuesOnly");
+      const searchCal = params.get("searchCal");
+
+      if (filterGroup && group) filterGroup.value = group;
+      if (filterCategory && category) filterCategory.value = category;
+      if (filterSearch && q !== null) filterSearch.value = q;
+
+      if (status) {{
+        const allowed = new Set(status.split(",").map((s) => s.trim()).filter(Boolean));
+        statusInputs.forEach((input) => {{
+          input.checked = allowed.has(input.value);
+        }});
+      }}
+
+      if (actionable === "1") {{
+        if (actionableToggle) actionableToggle.checked = true;
+        if (actionableToggleMobile) actionableToggleMobile.checked = true;
+      }}
+
+      if (view === "week" || view === "month") {{
+        calendarView = view;
+        updateViewToggleLabel();
+      }}
+
+      if (calendarIssuesOnly && issuesOnly === "1") {{
+        calendarIssuesOnly.checked = true;
+      }}
+
+      if (calendarSearchToggle && searchCal === "1") {{
+        calendarSearchToggle.checked = true;
+      }}
+
+      let nextDates = [];
+      if (dates) {{
+        nextDates = dates.split(",").map((d) => d.trim()).filter(Boolean);
+      }} else if (date) {{
+        nextDates = [date];
+      }}
+      if (nextDates.length) {{
+        selectedDates = new Set(nextDates);
+        focusDate = nextDates[nextDates.length - 1];
+        const focusObj = parseIsoToDate(focusDate);
+        if (focusObj) {{
+          currentMonth = new Date(focusObj.getFullYear(), focusObj.getMonth(), 1);
+        }}
+      }}
+    }}
+
     window.filterDate = function(isoDate) {{
       if (!isoDate) return;
       setSelection([isoDate], isoDate);
@@ -3699,6 +3794,7 @@ def render_report_html(report: Dict[str, Any]) -> str:
         calendarView = calendarView === "month" ? "week" : "month";
         updateViewToggleLabel();
         renderCalendar();
+        updateUrlState();
       }});
       updateViewToggleLabel();
     }}
@@ -3706,12 +3802,14 @@ def render_report_html(report: Dict[str, Any]) -> str:
     if (calendarIssuesOnly) {{
       calendarIssuesOnly.addEventListener("change", () => {{
         renderCalendar();
+        updateUrlState();
       }});
     }}
 
     if (calendarSearchToggle) {{
       calendarSearchToggle.addEventListener("change", () => {{
         rebuildCalendarModel();
+        updateUrlState();
       }});
     }}
 
@@ -3772,6 +3870,7 @@ def render_report_html(report: Dict[str, Any]) -> str:
       }}
     }});
 
+    applyUrlState();
     calendarModel = buildCalendarModel();
     populateMonthSelect();
     applyDefaultSelection();
