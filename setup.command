@@ -63,6 +63,7 @@ EOF
 
 chmod +x run.command
 chmod +x start.command
+chmod +x stop.command
 
 launchctl bootstrap "gui/$UID" "$PLIST" || true
 launchctl kickstart -k "gui/$UID/com.cricknet.checker" || true
