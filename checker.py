@@ -1435,6 +1435,47 @@ def render_report_html(report: Dict[str, Any]) -> str:
             except: pass
         return f'<div class="font-bold text-base">{uk}</div>'
 
+    def short_group_label(name: str) -> str:
+        parts = (name or "").strip().split()
+        if not parts:
+            return "Group"
+        return parts[0][:4]
+
+    calendar_events: List[Dict[str, str]] = []
+    for g in groups:
+        g_name = str(g.get("display", "")).strip()
+        if not g_name:
+            continue
+        slug = group_slug(g_name)
+        short_label = short_group_label(g_name)
+        for s in g.get("sections", []):
+            date_iso = str(s.get("date_iso", "")).strip()
+            if not date_iso:
+                continue
+            category_raw = str(s.get("category", "")).strip()
+            anchor = section_anchor(g_name, date_iso, category_raw)
+            calendar_events.append({
+                "date_iso": date_iso,
+                "group_slug": slug,
+                "group_label": g_name,
+                "category": category_raw,
+                "anchor": anchor,
+                "short_label": short_label,
+            })
+
+    calendar_events_json = json.dumps(calendar_events).replace("</", "<\\/")
+    calendar_pills_parts = []
+    for ev in calendar_events:
+        cat = str(ev.get("category", "")).lower()
+        border_class = "border-dashed" if "external" in cat else "border-solid"
+        calendar_pills_parts.append(f"""
+        <a href="#{html_escape(ev.get("anchor", ""))}" class="cal-pill group-{html_escape(ev.get("group_slug", ""))} {border_class} is-hidden" data-cal-date="{html_escape(ev.get("date_iso", ""))}" title="{html_escape(ev.get("group_label", ""))}">
+            <span class="cal-dot group-{html_escape(ev.get("group_slug", ""))}"></span>
+            <span class="cal-text">{html_escape(ev.get("short_label", ""))}</span>
+        </a>
+        """)
+    calendar_pills_html = "\n".join(calendar_pills_parts)
+
     # Priority cards
     priority_cards = ""
     if priority:
@@ -2146,6 +2187,157 @@ def render_report_html(report: Dict[str, Any]) -> str:
       }}
     }}
 
+    /* Custom Calendar Grid Styles */
+    .custom-calendar-card {{
+      background: #fff;
+      max-width: 100%;
+    }}
+
+    .cal-grid {{
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+      text-align: center;
+    }}
+
+    .cal-header {{
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      padding-bottom: 8px;
+    }}
+
+    .cal-cell {{
+      aspect-ratio: 1 / 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding-top: 4px;
+      border-radius: 6px;
+      border: 1px solid transparent;
+      background: transparent;
+      cursor: pointer;
+      position: relative;
+      transition: background 0.15s;
+    }}
+
+    .cal-cell.empty {{
+      cursor: default;
+    }}
+
+    .cal-cell:hover:not(.empty) {{
+      background-color: #f3f4f6;
+    }}
+
+    .cal-cell.is-selected {{
+      background-color: #ebf8ff;
+      border-color: #4299e1;
+      color: #2b6cb0;
+    }}
+
+    .cal-cell.is-today .day-num {{
+      background-color: var(--text-main);
+      color: #fff;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      line-height: 24px;
+      display: block;
+    }}
+
+    .day-num {{
+      font-size: 0.9rem;
+      font-weight: 600;
+      line-height: 1.2;
+      z-index: 2;
+    }}
+
+    .cal-dots-row {{
+      display: flex;
+      gap: 2px;
+      margin-top: 2px;
+      height: 6px;
+      justify-content: center;
+    }}
+
+    .cal-grid-dot {{
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--group-color);
+    }}
+
+    .calendar-wrapper {{
+      display: grid;
+      gap: 0.75rem;
+    }}
+
+    .calendar-events {{
+      display: grid;
+      gap: 0.5rem;
+    }}
+
+    .calendar-events-header {{
+      font-family: "Space Grotesk", sans-serif;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-muted);
+    }}
+
+    .calendar-empty {{
+      display: none;
+      font-size: 0.75rem;
+      opacity: 0.6;
+    }}
+
+    .calendar-empty.is-visible {{
+      display: block;
+    }}
+
+    .cal-events-list {{
+      flex-grow: 1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+    }}
+
+    .cal-pill {{
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-decoration: none;
+      color: var(--text-main);
+      background: color-mix(in srgb, var(--group-color) 15%, white);
+      border-width: 1.5px;
+      border-color: var(--group-color);
+      transition: transform 0.1s;
+    }}
+
+    .cal-pill:hover {{
+      transform: scale(1.05);
+    }}
+
+    .cal-pill.border-dashed {{
+      border-style: dashed;
+    }}
+
+    .cal-pill.border-solid {{
+      border-style: solid;
+    }}
+
+    .cal-dot {{
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--group-color);
+    }}
+
     {group_color_css_text}
   </style>
 </head>
@@ -2210,6 +2402,33 @@ def render_report_html(report: Dict[str, Any]) -> str:
               <div class="text-warning">{total_check} check</div>
             </div>
             <div class="mt-3 text-xs opacity-70">{summary_line}</div>
+          </div>
+        </div>
+
+        <div id="calendar-card" class="card bg-base-100 shadow">
+          <div class="card-body p-4">
+            <div class="text-xs uppercase tracking-wide opacity-70 mb-1">Calendar</div>
+
+            <div class="calendar-wrapper">
+              <div class="custom-calendar-card bg-base-100 border border-base-300 shadow-lg rounded-box p-4">
+                <div class="cal-top-bar mb-4 flex justify-between items-center">
+                  <span class="text-lg font-bold tracking-tight" id="calendar-month-label">Month</span>
+                  <div class="flex gap-1">
+                    <button class="btn btn-xs btn-ghost btn-square" id="calendar-prev" type="button" aria-label="Previous month">◀</button>
+                    <button class="btn btn-xs btn-ghost btn-square" id="calendar-next" type="button" aria-label="Next month">▶</button>
+                  </div>
+                </div>
+                <div class="cal-grid" id="calendar-grid"></div>
+              </div>
+
+              <div class="calendar-events mt-2">
+                <div class="calendar-events-header" id="calendar-events-title">Events</div>
+                <div class="cal-events-list" id="calendar-events-list">
+                  {calendar_pills_html}
+                </div>
+                <div class="calendar-empty" id="calendar-events-empty">No events on this date.</div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -2347,6 +2566,8 @@ def render_report_html(report: Dict[str, Any]) -> str:
   <button id="to-top" class="btn btn-primary btn-sm to-top" aria-label="Back to top">Top</button>
 
   <script>
+    window.CALENDAR_EVENTS = {calendar_events_json};
+
     function toggleAllGroups(openState) {{
       document.querySelectorAll("details.group-details").forEach((el) => {{
         el.open = openState;
@@ -2354,7 +2575,12 @@ def render_report_html(report: Dict[str, Any]) -> str:
     }}
 
     const summaryCard = document.querySelector(".quick-summary");
+    const calendarCard = document.querySelector("#calendar-card");
     const summarySection = document.querySelector("#summary");
+    function syncCalendarVisibility() {{
+      if (!calendarCard || !summaryCard) return;
+      calendarCard.classList.toggle("is-hidden", summaryCard.classList.contains("is-visible"));
+    }}
     if (summaryCard && summarySection && "IntersectionObserver" in window) {{
       const observer = new IntersectionObserver(
         (entries) => {{
@@ -2364,6 +2590,7 @@ def render_report_html(report: Dict[str, Any]) -> str:
             }} else {{
               summaryCard.classList.add("is-visible");
             }}
+            syncCalendarVisibility();
           }});
         }},
         {{ root: null, threshold: 0.2 }}
@@ -2371,6 +2598,7 @@ def render_report_html(report: Dict[str, Any]) -> str:
       observer.observe(summarySection);
     }} else if (summaryCard) {{
       summaryCard.classList.add("is-visible");
+      syncCalendarVisibility();
     }}
 
     const groupCards = Array.from(document.querySelectorAll(".group-card[data-group]"));
@@ -2682,6 +2910,173 @@ def render_report_html(report: Dict[str, Any]) -> str:
         sel.dispatchEvent(new Event("change"));
       }});
     }});
+
+    const calendarGrid = document.querySelector("#calendar-grid");
+    const calendarMonthLabel = document.querySelector("#calendar-month-label");
+    const calendarPrev = document.querySelector("#calendar-prev");
+    const calendarNext = document.querySelector("#calendar-next");
+    const calendarEvents = Array.from(document.querySelectorAll("[data-cal-date]"));
+    const calendarEmpty = document.querySelector("#calendar-events-empty");
+    const calendarTitle = document.querySelector("#calendar-events-title");
+    const calendarEventsData = window.CALENDAR_EVENTS || calendarEvents.map((el) => {{
+      const dateIso = el.getAttribute("data-cal-date") || "";
+      const groupClass = Array.from(el.classList).find((cls) => cls.startsWith("group-")) || "";
+      const groupSlug = groupClass.replace("group-", "");
+      const groupLabel = el.getAttribute("title") || groupSlug || "Group";
+      const anchor = (el.getAttribute("href") || "").replace(/^#/, "");
+      const shortLabelEl = el.querySelector(".cal-text");
+      const shortLabel = shortLabelEl ? shortLabelEl.textContent.trim() : "";
+      const isExternal = el.classList.contains("border-dashed");
+      return {{
+        date_iso: dateIso,
+        group_slug: groupSlug,
+        group_label: groupLabel,
+        category: isExternal ? "External" : "Internal",
+        anchor,
+        short_label: shortLabel,
+      }};
+    }});
+
+    function formatCalendarHeader(iso) {{
+      if (!iso) return "Events";
+      const parsed = new Date(iso + "T00:00:00");
+      if (Number.isNaN(parsed.getTime())) return "Events";
+      return "Events on " + parsed.toLocaleDateString("en-GB", {{
+        weekday: "short",
+        day: "2-digit",
+        month: "short",
+      }});
+    }}
+
+    function buildIsoDate(year, monthIndex, day) {{
+      const m = String(monthIndex + 1).padStart(2, "0");
+      const d = String(day).padStart(2, "0");
+      return `${{year}}-${{m}}-${{d}}`;
+    }}
+
+    const todayObj = new Date();
+    const todayStr = buildIsoDate(todayObj.getFullYear(), todayObj.getMonth(), todayObj.getDate());
+
+    let selectedDate = todayStr;
+    let currentMonth = new Date(todayObj.getFullYear(), todayObj.getMonth(), 1);
+
+    const eventsByDate = new Map();
+    calendarEventsData.forEach((ev) => {{
+      if (!ev || !ev.date_iso) return;
+      const list = eventsByDate.get(ev.date_iso) || [];
+      list.push(ev);
+      eventsByDate.set(ev.date_iso, list);
+    }});
+
+    function renderCalendarMonth() {{
+      if (!calendarGrid) return;
+      calendarGrid.innerHTML = "";
+
+      const headers = ["M", "T", "W", "T", "F", "S", "S"];
+      headers.forEach((label) => {{
+        const cell = document.createElement("div");
+        cell.className = "cal-header";
+        cell.textContent = label;
+        calendarGrid.appendChild(cell);
+      }});
+
+      if (calendarMonthLabel) {{
+        calendarMonthLabel.textContent = currentMonth.toLocaleDateString("en-GB", {{
+          month: "long",
+          year: "numeric",
+        }});
+      }}
+
+      const year = currentMonth.getFullYear();
+      const month = currentMonth.getMonth();
+      const firstDay = new Date(year, month, 1);
+      const startDay = (firstDay.getDay() + 6) % 7; // Monday-first
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+      for (let i = 0; i < startDay; i += 1) {{
+        const empty = document.createElement("div");
+        empty.className = "cal-cell empty";
+        calendarGrid.appendChild(empty);
+      }}
+
+      for (let day = 1; day <= daysInMonth; day += 1) {{
+        const dateIso = buildIsoDate(year, month, day);
+        const cell = document.createElement("button");
+        cell.type = "button";
+        cell.className = "cal-cell day";
+        if (dateIso === todayStr) cell.classList.add("is-today");
+        if (dateIso === selectedDate) cell.classList.add("is-selected");
+        cell.setAttribute("data-date", dateIso);
+
+        const dayNum = document.createElement("span");
+        dayNum.className = "day-num";
+        dayNum.textContent = String(day);
+        cell.appendChild(dayNum);
+
+        const dotsRow = document.createElement("div");
+        dotsRow.className = "cal-dots-row";
+        const dayEvents = eventsByDate.get(dateIso) || [];
+        dayEvents.forEach((ev) => {{
+          const dot = document.createElement("span");
+          dot.className = `cal-grid-dot group-${{ev.group_slug}}`;
+          dotsRow.appendChild(dot);
+        }});
+        cell.appendChild(dotsRow);
+
+        cell.addEventListener("click", () => {{
+          filterDate(dateIso);
+        }});
+        calendarGrid.appendChild(cell);
+      }}
+
+      const totalCells = startDay + daysInMonth;
+      const trailing = (7 - (totalCells % 7)) % 7;
+      for (let i = 0; i < trailing; i += 1) {{
+        const empty = document.createElement("div");
+        empty.className = "cal-cell empty";
+        calendarGrid.appendChild(empty);
+      }}
+    }}
+
+    window.filterDate = function(isoDate) {{
+      if (isoDate) {{
+        selectedDate = isoDate;
+      }}
+      let visibleCount = 0;
+      calendarEvents.forEach((eventEl) => {{
+        const eventDate = eventEl.getAttribute("data-cal-date") || "";
+        const show = (eventDate === selectedDate);
+        eventEl.classList.toggle("is-hidden", !show);
+        if (show) visibleCount += 1;
+      }});
+
+      if (calendarTitle) calendarTitle.textContent = formatCalendarHeader(selectedDate);
+      if (calendarEmpty) {{
+        if (visibleCount === 0) {{
+          calendarEmpty.textContent = "No events on this date.";
+          calendarEmpty.classList.add("is-visible");
+        }} else {{
+          calendarEmpty.classList.remove("is-visible");
+        }}
+      }}
+      renderCalendarMonth();
+    }};
+
+    if (calendarPrev) {{
+      calendarPrev.addEventListener("click", () => {{
+        currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1);
+        renderCalendarMonth();
+      }});
+    }}
+    if (calendarNext) {{
+      calendarNext.addEventListener("click", () => {{
+        currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1);
+        renderCalendarMonth();
+      }});
+    }}
+
+    renderCalendarMonth();
+    filterDate(todayStr);
 
     applyFilters();
     startNextUpdateCountdown();
