@@ -1133,6 +1133,7 @@ def build_report_model() -> Dict[str, Any]:
     model: Dict[str, Any] = {
         "generatedAt": now_dt.strftime("%Y-%m-%d %H:%M:%S %Z"),
         "generated_friendly": format_friendly_dt(now_dt),
+        "reportDateIso": now_dt.date().isoformat(),
         "sourceLastUpdated": "",
         "sourceLastUpdatedRaw": "",
         "sourceLastUpdatedFriendly": "",
@@ -1209,6 +1210,10 @@ def generate_mailto(group_name: str, missing_list: List[str], date_str: str) -> 
 def render_report_html(report: Dict[str, Any]) -> str:
     generated_friendly = html_escape(str(report.get("generated_friendly", "")))
     source_updated_friendly = html_escape(str(report.get("sourceLastUpdatedFriendly", "")))
+    report_date_iso_raw = str(report.get("reportDateIso", "")).strip()
+    if not report_date_iso_raw:
+        report_date_iso_raw = today_iso()
+    report_date_iso = html_escape(report_date_iso_raw)
     # Countdown: render DaisyUI markup (do NOT html_escape this block)
     next_update_msg_fallback = html_escape(str(report.get("nextUpdateMsg", "")))
     next_due = bool(report.get("nextUpdateDue", False))
@@ -1728,7 +1733,7 @@ def render_report_html(report: Dict[str, Any]) -> str:
                         """)
 
                 group_html_parts.append(f"""
-                  <div id="{html_escape(section_anchor(g.get("display", ""), s.get("date_iso", ""), s.get("category", "")))}" class="{box_class} date-card" data-group="{slug}" data-category="{html_escape(category_raw).lower()}">
+                  <div id="{html_escape(section_anchor(g.get("display", ""), s.get("date_iso", ""), s.get("category", "")))}" class="{box_class} date-card" data-group="{slug}" data-category="{html_escape(category_raw).lower()}" data-date="{html_escape(date_iso)}" data-group-label="{html_escape(g_name)}" data-group-url="{html_escape(g_url)}">
                     <div class="flex flex-row items-start gap-4 mb-3">
                       <div class="flex-none w-16 text-center pt-1">
                          {date_cell_parts(date_iso, date_uk)}
@@ -2273,6 +2278,38 @@ def render_report_html(report: Dict[str, Any]) -> str:
       gap: 0.75rem;
     }}
 
+    .calendar-sticky {{
+      position: sticky;
+      top: 1rem;
+      align-self: start;
+    }}
+
+    .calendar-header {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }}
+
+    .calendar-controls {{
+      display: grid;
+      gap: 0.4rem;
+    }}
+
+    .calendar-controls-row {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }}
+
+    .calendar-toggle {{
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }}
+
     .calendar-events {{
       display: grid;
       gap: 0.5rem;
@@ -2301,6 +2338,41 @@ def render_report_html(report: Dict[str, Any]) -> str:
       display: flex;
       flex-wrap: wrap;
       gap: 0.35rem;
+    }}
+
+    .calendar-agenda {{
+      display: grid;
+      gap: 0.35rem;
+    }}
+
+    .calendar-agenda-summary {{
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }}
+
+    .calendar-agenda-list {{
+      display: grid;
+      gap: 0.45rem;
+    }}
+
+    @media (max-width: 768px) {{
+      #calendar-collapse-toggle {{
+        display: inline-flex;
+      }}
+
+      #calendar-card.is-collapsed .calendar-wrapper {{
+        display: none;
+      }}
+
+      #calendar-card.is-collapsed .calendar-events {{
+        display: none;
+      }}
+    }}
+
+    @media (min-width: 769px) {{
+      #calendar-collapse-toggle {{
+        display: none;
+      }}
     }}
 
     .cal-pill {{
@@ -2405,15 +2477,37 @@ def render_report_html(report: Dict[str, Any]) -> str:
           </div>
         </div>
 
-        <div id="calendar-card" class="card bg-base-100 shadow">
+        <div id="calendar-card" class="card bg-base-100 shadow calendar-sticky" data-report-date="{report_date_iso}">
           <div class="card-body p-4">
-            <div class="text-xs uppercase tracking-wide opacity-70 mb-1">Calendar</div>
+            <div class="calendar-header">
+              <div class="text-xs uppercase tracking-wide opacity-70">Calendar</div>
+              <button class="btn btn-ghost btn-xs" id="calendar-collapse-toggle" type="button" aria-expanded="true">Collapse</button>
+            </div>
+
+            <div class="calendar-controls mt-2">
+              <div class="calendar-controls-row">
+                <button class="btn btn-xs btn-outline" id="calendar-jump-today" type="button">Jump to today</button>
+                <button class="btn btn-xs btn-outline" id="calendar-jump-issue" type="button">Jump to next issue</button>
+                <button class="btn btn-xs btn-ghost" id="calendar-view-toggle" type="button">Month</button>
+              </div>
+              <div class="calendar-controls-row">
+                <label class="calendar-toggle">
+                  <input type="checkbox" class="checkbox checkbox-xs" id="calendar-issues-only" />
+                  <span>Issues only</span>
+                </label>
+                <label class="calendar-toggle">
+                  <input type="checkbox" class="checkbox checkbox-xs" id="calendar-search-toggle" />
+                  <span>Search affects calendar</span>
+                </label>
+              </div>
+            </div>
 
             <div class="calendar-wrapper">
               <div class="custom-calendar-card bg-base-100 border border-base-300 shadow-lg rounded-box p-4">
                 <div class="cal-top-bar mb-4 flex justify-between items-center">
                   <span class="text-lg font-bold tracking-tight" id="calendar-month-label">Month</span>
                   <div class="flex gap-1">
+                    <select id="calendar-month-select" class="select select-xs select-bordered" aria-label="Jump to month"></select>
                     <button class="btn btn-xs btn-ghost btn-square" id="calendar-prev" type="button" aria-label="Previous month">◀</button>
                     <button class="btn btn-xs btn-ghost btn-square" id="calendar-next" type="button" aria-label="Next month">▶</button>
                   </div>
@@ -2428,6 +2522,13 @@ def render_report_html(report: Dict[str, Any]) -> str:
                 </div>
                 <div class="calendar-empty" id="calendar-events-empty">No events on this date.</div>
               </div>
+            </div>
+
+            <div class="calendar-agenda mt-4" id="calendar-agenda">
+              <div class="calendar-events-header">Agenda</div>
+              <div class="calendar-agenda-summary" id="calendar-agenda-summary"></div>
+              <div class="calendar-agenda-list" id="calendar-agenda-list"></div>
+              <div class="calendar-empty" id="calendar-agenda-empty">No items for this date.</div>
             </div>
           </div>
         </div>
