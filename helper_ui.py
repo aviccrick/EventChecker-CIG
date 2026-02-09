@@ -193,7 +193,8 @@ def inject_toolbar(report_html: str) -> str:
         else:
             html = html + script
 
-    return replace_spreadsheet_box(html)
+    html = replace_spreadsheet_box(html)
+    return add_column_gap(html)
 
 
 def replace_spreadsheet_box(report_html: str) -> str:
@@ -219,6 +220,13 @@ def replace_spreadsheet_box(report_html: str) -> str:
         re.DOTALL,
     )
     return pattern.sub(replacement, report_html, count=1)
+
+
+def add_column_gap(report_html: str) -> str:
+    return report_html.replace(
+        'class="grid gap-6 lg:grid-cols-[460px_minmax(0,1fr)]"',
+        'class="grid gap-8 lg:grid-cols-[460px_minmax(0,1fr)]"',
+    )
 
 
 def render_empty_page() -> str:

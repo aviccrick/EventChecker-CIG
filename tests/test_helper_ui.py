@@ -42,6 +42,20 @@ class TestHelperUI(unittest.TestCase):
         self.assertIn("Next Scheduled Run", combined)
         self.assertIn("id=\"helper-next-run\"", combined)
 
+    def test_inject_toolbar_adds_column_gap(self):
+        from helper_ui import inject_toolbar
+
+        report_html = """
+        <html><body>
+          <div class=\"grid gap-6 lg:grid-cols-[460px_minmax(0,1fr)]\">
+            <aside>Left</aside>
+            <main>Right</main>
+          </div>
+        </body></html>
+        """
+        combined = inject_toolbar(report_html)
+        self.assertIn("grid gap-8 lg:grid-cols-[460px_minmax(0,1fr)]", combined)
+
     def test_inject_toolbar_does_not_use_iframe(self):
         from helper_ui import inject_toolbar
 
