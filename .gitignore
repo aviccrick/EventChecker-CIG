@@ -16,5 +16,4 @@ report/
 crick_talk_data_extract.json
 crick_talk_data_extract*.json
 
-docs/plans/
 tests/
