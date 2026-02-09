@@ -2241,6 +2241,11 @@ def render_report_html(report: Dict[str, Any]) -> str:
       color: #2b6cb0;
     }}
 
+    .cal-cell.is-focused {{
+      outline: 2px solid #1d4ed8;
+      outline-offset: 1px;
+    }}
+
     .cal-cell.is-today .day-num {{
       background-color: var(--text-main);
       color: #fff;
@@ -2303,6 +2308,10 @@ def render_report_html(report: Dict[str, Any]) -> str:
 
     .cal-cell.heat-4 {{
       background: rgba(251, 191, 36, 0.75);
+    }}
+
+    .cal-cell.issues-hidden {{
+      visibility: hidden;
     }}
 
     .calendar-tooltip {{
@@ -2415,6 +2424,33 @@ def render_report_html(report: Dict[str, Any]) -> str:
     .calendar-agenda-list {{
       display: grid;
       gap: 0.45rem;
+    }}
+
+    .agenda-item {{
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 0.5rem;
+      padding: 0.5rem 0.6rem;
+      border-radius: 0.6rem;
+      border: 1px solid #e2e8f0;
+      background: #fff;
+    }}
+
+    .agenda-title {{
+      font-size: 0.8rem;
+      font-weight: 600;
+    }}
+
+    .agenda-meta {{
+      font-size: 0.7rem;
+      color: var(--text-muted);
+    }}
+
+    .agenda-actions {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem;
     }}
 
     @media (max-width: 768px) {{
@@ -3082,6 +3118,16 @@ def render_report_html(report: Dict[str, Any]) -> str:
     const calendarEvents = Array.from(document.querySelectorAll("[data-cal-date]"));
     const calendarEmpty = document.querySelector("#calendar-events-empty");
     const calendarTitle = document.querySelector("#calendar-events-title");
+    const calendarAgendaList = document.querySelector("#calendar-agenda-list");
+    const calendarAgendaSummary = document.querySelector("#calendar-agenda-summary");
+    const calendarAgendaEmpty = document.querySelector("#calendar-agenda-empty");
+    const calendarJumpToday = document.querySelector("#calendar-jump-today");
+    const calendarJumpIssue = document.querySelector("#calendar-jump-issue");
+    const calendarViewToggle = document.querySelector("#calendar-view-toggle");
+    const calendarIssuesOnly = document.querySelector("#calendar-issues-only");
+    const calendarSearchToggle = document.querySelector("#calendar-search-toggle");
+    const calendarCollapseToggle = document.querySelector("#calendar-collapse-toggle");
+    const calendarMonthSelect = document.querySelector("#calendar-month-select");
     const calendarEventsData = window.CALENDAR_EVENTS || calendarEvents.map((el) => {{
       const dateIso = el.getAttribute("data-cal-date") || "";
       const groupClass = Array.from(el.classList).find((cls) => cls.startsWith("group-")) || "";
@@ -3121,8 +3167,10 @@ def render_report_html(report: Dict[str, Any]) -> str:
     const todayObj = new Date();
     const todayStr = buildIsoDate(todayObj.getFullYear(), todayObj.getMonth(), todayObj.getDate());
 
-    let selectedDate = todayStr;
+    let focusDate = todayStr;
+    let selectedDates = new Set([todayStr]);
     let currentMonth = new Date(todayObj.getFullYear(), todayObj.getMonth(), 1);
+    let calendarView = "month";
 
     let calendarModel = {{
       byDate: new Map(),
@@ -3246,7 +3294,15 @@ def render_report_html(report: Dict[str, Any]) -> str:
 
     function rebuildCalendarModel() {{
       calendarModel = buildCalendarModel();
+      populateMonthSelect();
+      const hasVisibleSelection = Array.from(selectedDates).some((d) => calendarModel.byDate.has(d));
+      if (!hasVisibleSelection) {{
+        applyDefaultSelection();
+        return;
+      }}
+      updateCalendarEvents(focusDate);
       renderCalendar();
+      renderAgenda();
     }}
 
     function renderCalendar() {{
@@ -3261,37 +3317,71 @@ def render_report_html(report: Dict[str, Any]) -> str:
         calendarGrid.appendChild(cell);
       }});
 
+      const monthYearLabel = currentMonth.toLocaleDateString("en-GB", {{
+        month: "long",
+        year: "numeric",
+      }});
       if (calendarMonthLabel) {{
-        calendarMonthLabel.textContent = currentMonth.toLocaleDateString("en-GB", {{
-          month: "long",
-          year: "numeric",
-        }});
+        if (calendarView === "week") {{
+          const focusObj = new Date((focusDate || todayStr) + "T00:00:00");
+          const weekLabel = Number.isNaN(focusObj.getTime())
+            ? monthYearLabel
+            : focusObj.toLocaleDateString("en-GB", {{ day: "2-digit", month: "short", year: "numeric" }});
+          calendarMonthLabel.textContent = `Week of ${{weekLabel}}`;
+        }} else {{
+          calendarMonthLabel.textContent = monthYearLabel;
+        }}
+      }}
+
+      if (calendarMonthSelect) {{
+        calendarMonthSelect.disabled = calendarView !== "month";
       }}
 
       const year = currentMonth.getFullYear();
       const month = currentMonth.getMonth();
-      const firstDay = new Date(year, month, 1);
-      const startDay = (firstDay.getDay() + 6) % 7; // Monday-first
-      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      const renderDates = [];
+      let leadingEmpty = 0;
+      let trailingEmpty = 0;
 
-      for (let i = 0; i < startDay; i += 1) {{
+      if (calendarView === "week") {{
+        let base = new Date((focusDate || todayStr) + "T00:00:00");
+        if (Number.isNaN(base.getTime())) base = new Date();
+        const start = new Date(base);
+        const offset = (start.getDay() + 6) % 7;
+        start.setDate(start.getDate() - offset);
+        for (let i = 0; i < 7; i += 1) {{
+          renderDates.push(new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
+        }}
+      }} else {{
+        const firstDay = new Date(year, month, 1);
+        leadingEmpty = (firstDay.getDay() + 6) % 7; // Monday-first
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        for (let day = 1; day <= daysInMonth; day += 1) {{
+          renderDates.push(new Date(year, month, day));
+        }}
+        const totalCells = leadingEmpty + daysInMonth;
+        trailingEmpty = (7 - (totalCells % 7)) % 7;
+      }}
+
+      for (let i = 0; i < leadingEmpty; i += 1) {{
         const empty = document.createElement("div");
         empty.className = "cal-cell empty";
         calendarGrid.appendChild(empty);
       }}
 
-      for (let day = 1; day <= daysInMonth; day += 1) {{
-        const dateIso = buildIsoDate(year, month, day);
+      renderDates.forEach((dateObj) => {{
+        const dateIso = buildIsoDate(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
         const cell = document.createElement("button");
         cell.type = "button";
         cell.className = "cal-cell day";
         if (dateIso === todayStr) cell.classList.add("is-today");
-        if (dateIso === selectedDate) cell.classList.add("is-selected");
+        if (selectedDates.has(dateIso)) cell.classList.add("is-selected");
+        if (dateIso === focusDate) cell.classList.add("is-focused");
         cell.setAttribute("data-date", dateIso);
 
         const dayNum = document.createElement("span");
         dayNum.className = "day-num";
-        dayNum.textContent = String(day);
+        dayNum.textContent = String(dateObj.getDate());
         cell.appendChild(dayNum);
 
         const info = calendarModel.byDate.get(dateIso);
@@ -3311,34 +3401,54 @@ def render_report_html(report: Dict[str, Any]) -> str:
           cell.classList.add("heat-0");
         }}
 
-        cell.addEventListener("click", () => {{
-          filterDate(dateIso);
+        if (calendarIssuesOnly && calendarIssuesOnly.checked && (!info || info.issues === 0)) {{
+          cell.classList.add("issues-hidden");
+        }}
+
+        cell.addEventListener("click", (event) => {{
+          handleDateClick(event, dateIso);
         }});
         calendarGrid.appendChild(cell);
-      }}
+      }});
 
-      const totalCells = startDay + daysInMonth;
-      const trailing = (7 - (totalCells % 7)) % 7;
-      for (let i = 0; i < trailing; i += 1) {{
+      for (let i = 0; i < trailingEmpty; i += 1) {{
         const empty = document.createElement("div");
         empty.className = "cal-cell empty";
         calendarGrid.appendChild(empty);
       }}
     }}
 
-    window.filterDate = function(isoDate) {{
-      if (isoDate) {{
-        selectedDate = isoDate;
+    function parseIsoToDate(iso) {{
+      if (!iso) return null;
+      const parsed = new Date(iso + "T00:00:00");
+      if (Number.isNaN(parsed.getTime())) return null;
+      return parsed;
+    }}
+
+    function buildDateRange(startIso, endIso) {{
+      const start = parseIsoToDate(startIso);
+      const end = parseIsoToDate(endIso);
+      if (!start || !end) return [];
+      const dates = [];
+      const step = start <= end ? 1 : -1;
+      const cursor = new Date(start);
+      while ((step > 0 && cursor <= end) || (step < 0 && cursor >= end)) {{
+        dates.push(buildIsoDate(cursor.getFullYear(), cursor.getMonth(), cursor.getDate()));
+        cursor.setDate(cursor.getDate() + step);
       }}
+      return dates;
+    }}
+
+    function updateCalendarEvents(dateIso) {{
       let visibleCount = 0;
       calendarEvents.forEach((eventEl) => {{
         const eventDate = eventEl.getAttribute("data-cal-date") || "";
-        const show = (eventDate === selectedDate);
+        const show = (eventDate === dateIso);
         eventEl.classList.toggle("is-hidden", !show);
         if (show) visibleCount += 1;
       }});
 
-      if (calendarTitle) calendarTitle.textContent = formatCalendarHeader(selectedDate);
+      if (calendarTitle) calendarTitle.textContent = formatCalendarHeader(dateIso);
       if (calendarEmpty) {{
         if (visibleCount === 0) {{
           calendarEmpty.textContent = "No events on this date.";
@@ -3347,25 +3457,324 @@ def render_report_html(report: Dict[str, Any]) -> str:
           calendarEmpty.classList.remove("is-visible");
         }}
       }}
+    }}
+
+    function renderAgenda() {{
+      if (!calendarAgendaList) return;
+      calendarAgendaList.innerHTML = "";
+
+      const sortedDates = Array.from(selectedDates).sort();
+      let total = 0;
+      let missing = 0;
+      let check = 0;
+      let extra = 0;
+      let ok = 0;
+      const items = [];
+
+      sortedDates.forEach((dateIso) => {{
+        const info = calendarModel.byDate.get(dateIso);
+        if (!info) return;
+        total += info.total;
+        missing += info.missing;
+        check += info.check;
+        extra += info.extra;
+        ok += info.ok;
+        info.agenda.forEach((item) => items.push(item));
+      }});
+
+      if (calendarAgendaSummary) {{
+        if (total > 0) {{
+          calendarAgendaSummary.textContent = `${{total}} items · Missing ${{missing}} · Check ${{check}} · Extra ${{extra}} · OK ${{ok}}`;
+        }} else {{
+          calendarAgendaSummary.textContent = "";
+        }}
+      }}
+
+      if (calendarAgendaEmpty) {{
+        calendarAgendaEmpty.classList.toggle("is-visible", items.length === 0);
+      }}
+
+      items.sort((a, b) => a.date.localeCompare(b.date));
+      items.forEach((item) => {{
+        const statusLabel = item.status === "bad"
+          ? "Missing"
+          : (item.status === "warn" || item.status === "date_mismatch")
+            ? "Check"
+            : (item.status === "extra" ? "Extra" : "OK");
+
+        const entry = document.createElement("div");
+        entry.className = "agenda-item";
+
+        const main = document.createElement("div");
+        const titleEl = document.createElement("div");
+        titleEl.className = "agenda-title";
+        titleEl.textContent = item.title || "Agenda item";
+        const metaEl = document.createElement("div");
+        metaEl.className = "agenda-meta";
+        metaEl.textContent = `${{item.groupLabel || "Group"}} · ${{statusLabel}} · ${{item.date}}`;
+        main.appendChild(titleEl);
+        main.appendChild(metaEl);
+
+        const actions = document.createElement("div");
+        actions.className = "agenda-actions";
+
+        const copyBtn = document.createElement("button");
+        copyBtn.type = "button";
+        copyBtn.className = "btn btn-xs btn-ghost";
+        copyBtn.textContent = "Copy";
+        copyBtn.addEventListener("click", () => {{
+          const text = `${{item.title}} (${item.groupLabel || "Group"}) - ${{statusLabel}}`;
+          if (navigator.clipboard && navigator.clipboard.writeText) {{
+            navigator.clipboard.writeText(text);
+          }}
+        }});
+
+        const openLink = document.createElement("a");
+        openLink.className = "btn btn-xs btn-ghost";
+        openLink.textContent = "Open";
+        openLink.href = item.anchor ? `#${{item.anchor}}` : "#";
+
+        actions.appendChild(copyBtn);
+        actions.appendChild(openLink);
+
+        if (item.groupUrl) {{
+          const sourceLink = document.createElement("a");
+          sourceLink.className = "btn btn-xs btn-ghost";
+          sourceLink.textContent = "Source";
+          sourceLink.href = item.groupUrl;
+          sourceLink.target = "_blank";
+          actions.appendChild(sourceLink);
+        }}
+
+        entry.appendChild(main);
+        entry.appendChild(actions);
+        calendarAgendaList.appendChild(entry);
+      }});
+    }}
+
+    function setSelection(datesLike, newFocus) {{
+      const nextDates = Array.isArray(datesLike) ? datesLike : Array.from(datesLike || []);
+      selectedDates = new Set(nextDates);
+      if (newFocus) {{
+        focusDate = newFocus;
+      }} else if (nextDates.length) {{
+        focusDate = nextDates[nextDates.length - 1];
+      }}
+
+      const focusObj = parseIsoToDate(focusDate);
+      if (focusObj) {{
+        currentMonth = new Date(focusObj.getFullYear(), focusObj.getMonth(), 1);
+      }}
+
+      updateCalendarEvents(focusDate);
       renderCalendar();
+      renderAgenda();
+    }}
+
+    function handleDateClick(event, dateIso) {{
+      if (!dateIso) return;
+      if (event.shiftKey && focusDate) {{
+        const range = buildDateRange(focusDate, dateIso);
+        setSelection(range, dateIso);
+      }} else if (event.ctrlKey || event.metaKey) {{
+        const next = new Set(selectedDates);
+        if (next.has(dateIso)) {{
+          next.delete(dateIso);
+        }} else {{
+          next.add(dateIso);
+        }}
+        setSelection(next, dateIso);
+      }} else {{
+        setSelection([dateIso], dateIso);
+      }}
+      scrollToDate(dateIso);
+    }}
+
+    function scrollToDate(dateIso) {{
+      if (!dateIso) return;
+      const target = document.querySelector(`.date-card[data-date="${{dateIso}}"]:not(.is-hidden)`);
+      if (target) {{
+        target.scrollIntoView({{ behavior: "smooth", block: "start" }});
+      }}
+    }}
+
+    function jumpToNextIssue() {{
+      const list = calendarModel.issueDates;
+      if (!list.length) return;
+      const base = focusDate || todayStr;
+      let next = list.find((d) => d >= base);
+      if (!next) next = list[0];
+      setSelection([next], next);
+      scrollToDate(next);
+    }}
+
+    function jumpToToday() {{
+      setSelection([todayStr], todayStr);
+      scrollToDate(todayStr);
+    }}
+
+    function populateMonthSelect() {{
+      if (!calendarMonthSelect) return;
+      const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const year = currentMonth.getFullYear();
+      calendarMonthSelect.innerHTML = "";
+      monthNames.forEach((label, idx) => {{
+        const option = document.createElement("option");
+        option.value = String(idx);
+        option.textContent = `${{label}} ${{year}}`;
+        if (idx === currentMonth.getMonth()) {{
+          option.selected = true;
+        }}
+        calendarMonthSelect.appendChild(option);
+      }});
+    }}
+
+    function applyDefaultSelection() {{
+      const calendarCardEl = document.querySelector("#calendar-card");
+      const reportIso = calendarCardEl ? (calendarCardEl.getAttribute("data-report-date") || "") : "";
+      const baseIso = reportIso || todayStr;
+      if (calendarModel.eventDates.length) {{
+        const upcoming = calendarModel.eventDates.find((d) => d >= baseIso);
+        const fallback = upcoming || calendarModel.eventDates[calendarModel.eventDates.length - 1];
+        setSelection([fallback], fallback);
+        return;
+      }}
+      setSelection([baseIso], baseIso);
+    }}
+
+    function setFocusDate(dateIso) {{
+      if (!dateIso) return;
+      focusDate = dateIso;
+      const focusObj = parseIsoToDate(focusDate);
+      if (focusObj) {{
+        currentMonth = new Date(focusObj.getFullYear(), focusObj.getMonth(), 1);
+      }}
+      renderCalendar();
+    }}
+
+    function moveFocusBy(days) {{
+      const base = parseIsoToDate(focusDate || todayStr) || new Date();
+      base.setDate(base.getDate() + days);
+      const next = buildIsoDate(base.getFullYear(), base.getMonth(), base.getDate());
+      setFocusDate(next);
+    }}
+
+    function updateViewToggleLabel() {{
+      if (!calendarViewToggle) return;
+      calendarViewToggle.textContent = calendarView === "month" ? "Month" : "Week";
+    }}
+
+    window.filterDate = function(isoDate) {{
+      if (!isoDate) return;
+      setSelection([isoDate], isoDate);
     }};
 
     if (calendarPrev) {{
       calendarPrev.addEventListener("click", () => {{
         currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1);
+        populateMonthSelect();
         renderCalendar();
       }});
     }}
     if (calendarNext) {{
       calendarNext.addEventListener("click", () => {{
         currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1);
+        populateMonthSelect();
         renderCalendar();
       }});
     }}
 
+    if (calendarMonthSelect) {{
+      calendarMonthSelect.addEventListener("change", () => {{
+        const nextMonth = parseInt(calendarMonthSelect.value, 10);
+        if (Number.isFinite(nextMonth)) {{
+          currentMonth = new Date(currentMonth.getFullYear(), nextMonth, 1);
+          renderCalendar();
+        }}
+      }});
+    }}
+
+    if (calendarViewToggle) {{
+      calendarViewToggle.addEventListener("click", () => {{
+        calendarView = calendarView === "month" ? "week" : "month";
+        updateViewToggleLabel();
+        renderCalendar();
+      }});
+      updateViewToggleLabel();
+    }}
+
+    if (calendarIssuesOnly) {{
+      calendarIssuesOnly.addEventListener("change", () => {{
+        renderCalendar();
+      }});
+    }}
+
+    if (calendarSearchToggle) {{
+      calendarSearchToggle.addEventListener("change", () => {{
+        rebuildCalendarModel();
+      }});
+    }}
+
+    if (calendarJumpToday) {{
+      calendarJumpToday.addEventListener("click", () => {{
+        jumpToToday();
+      }});
+    }}
+
+    if (calendarJumpIssue) {{
+      calendarJumpIssue.addEventListener("click", () => {{
+        jumpToNextIssue();
+      }});
+    }}
+
+    if (calendarCollapseToggle && calendarCard) {{
+      const setCollapseState = (collapsed) => {{
+        calendarCard.classList.toggle("is-collapsed", collapsed);
+        calendarCollapseToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        calendarCollapseToggle.textContent = collapsed ? "Expand" : "Collapse";
+      }};
+
+      const initialCollapsed = window.matchMedia("(max-width: 768px)").matches;
+      setCollapseState(initialCollapsed);
+      calendarCollapseToggle.addEventListener("click", () => {{
+        setCollapseState(!calendarCard.classList.contains("is-collapsed"));
+      }});
+    }}
+
+    document.addEventListener("keydown", (event) => {{
+      const tag = (event.target && event.target.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+
+      if (event.key === "ArrowLeft") {{
+        event.preventDefault();
+        moveFocusBy(-1);
+      }} else if (event.key === "ArrowRight") {{
+        event.preventDefault();
+        moveFocusBy(1);
+      }} else if (event.key === "ArrowUp") {{
+        event.preventDefault();
+        moveFocusBy(-7);
+      }} else if (event.key === "ArrowDown") {{
+        event.preventDefault();
+        moveFocusBy(7);
+      }} else if (event.key === "Enter") {{
+        if (focusDate) setSelection([focusDate], focusDate);
+      }} else if (event.key === "n") {{
+        currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1);
+        populateMonthSelect();
+        renderCalendar();
+      }} else if (event.key === "p") {{
+        currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1);
+        populateMonthSelect();
+        renderCalendar();
+      }} else if (event.key === "t") {{
+        jumpToToday();
+      }}
+    }});
+
     calendarModel = buildCalendarModel();
-    renderCalendar();
-    filterDate(todayStr);
+    populateMonthSelect();
+    applyDefaultSelection();
 
     applyFilters();
     startNextUpdateCountdown();

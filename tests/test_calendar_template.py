@@ -17,6 +17,11 @@ class TestCalendarTemplate(unittest.TestCase):
         self.assertIn("cal-count", content)
         self.assertIn("heat-", content)
         self.assertIn("calendar-tooltip", content)
+        self.assertIn("calendar-agenda-list", content)
+        self.assertIn("jumpToNextIssue", content)
+        self.assertIn("keydown", content)
+        self.assertIn("shiftKey", content)
+        self.assertIn("ctrlKey", content)
 
 
 if __name__ == "__main__":
