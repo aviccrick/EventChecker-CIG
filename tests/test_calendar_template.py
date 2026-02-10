@@ -39,6 +39,11 @@ class TestCalendarTemplate(unittest.TestCase):
         self.assertIn("groupSlug", content)
         self.assertIn("groupSlugs", content)
 
+    def test_calendar_skips_weekends(self):
+        content = Path("checker.py").read_text(encoding="utf-8")
+        self.assertIn("isWeekend", content)
+        self.assertIn("skipWeekend", content)
+
 
 if __name__ == "__main__":
     unittest.main()

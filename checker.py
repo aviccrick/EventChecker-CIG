@@ -3361,18 +3361,26 @@ def render_report_html(report: Dict[str, Any]) -> str:
         const start = new Date(base);
         const offset = (start.getDay() + 6) % 7;
         start.setDate(start.getDate() - offset);
-        for (let i = 0; i < 7; i += 1) {{
+        for (let i = 0; i < 5; i += 1) {{
           renderDates.push(new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
         }}
       }} else {{
         const firstDay = new Date(year, month, 1);
-        leadingEmpty = (firstDay.getDay() + 6) % 7; // Monday-first
+        let firstWeekday = new Date(firstDay);
+        while (isWeekend(firstWeekday)) {{
+          firstWeekday.setDate(firstWeekday.getDate() + 1);
+        }}
+        const weekdayIndex = (firstWeekday.getDay() + 6) % 7; // Monday-first
+        leadingEmpty = Math.min(weekdayIndex, 4);
         const daysInMonth = new Date(year, month + 1, 0).getDate();
         for (let day = 1; day <= daysInMonth; day += 1) {{
-          renderDates.push(new Date(year, month, day));
+          const dateObj = new Date(year, month, day);
+          if (!isWeekend(dateObj)) {{
+            renderDates.push(dateObj);
+          }}
         }}
-        const totalCells = leadingEmpty + daysInMonth;
-        trailingEmpty = (7 - (totalCells % 7)) % 7;
+        const totalCells = leadingEmpty + renderDates.length;
+        trailingEmpty = (5 - (totalCells % 5)) % 5;
       }}
 
       for (let i = 0; i < leadingEmpty; i += 1) {{
@@ -3448,6 +3456,20 @@ def render_report_html(report: Dict[str, Any]) -> str:
       return parsed;
     }}
 
+    function isWeekend(dateObj) {{
+      const day = dateObj.getDay();
+      return day === 0 || day === 6;
+    }}
+
+    function skipWeekend(dateObj, step) {{
+      const cursor = new Date(dateObj);
+      const direction = step >= 0 ? 1 : -1;
+      while (isWeekend(cursor)) {{
+        cursor.setDate(cursor.getDate() + direction);
+      }}
+      return cursor;
+    }}
+
     function buildDateRange(startIso, endIso) {{
       const start = parseIsoToDate(startIso);
       const end = parseIsoToDate(endIso);
@@ -3456,7 +3478,9 @@ def render_report_html(report: Dict[str, Any]) -> str:
       const step = start <= end ? 1 : -1;
       const cursor = new Date(start);
       while ((step > 0 && cursor <= end) || (step < 0 && cursor >= end)) {{
-        dates.push(buildIsoDate(cursor.getFullYear(), cursor.getMonth(), cursor.getDate()));
+        if (!isWeekend(cursor)) {{
+          dates.push(buildIsoDate(cursor.getFullYear(), cursor.getMonth(), cursor.getDate()));
+        }}
         cursor.setDate(cursor.getDate() + step);
       }}
       return dates;
@@ -3678,7 +3702,8 @@ def render_report_html(report: Dict[str, Any]) -> str:
     function moveFocusBy(days) {{
       const base = parseIsoToDate(focusDate || todayStr) || new Date();
       base.setDate(base.getDate() + days);
-      const next = buildIsoDate(base.getFullYear(), base.getMonth(), base.getDate());
+      const adjusted = skipWeekend(base, days);
+      const next = buildIsoDate(adjusted.getFullYear(), adjusted.getMonth(), adjusted.getDate());
       setFocusDate(next);
     }}
 
