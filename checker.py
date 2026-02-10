@@ -2201,7 +2201,7 @@ def render_report_html(report: Dict[str, Any]) -> str:
 
     .cal-grid {{
       display: grid;
-      grid-template-columns: repeat(5, 1fr);
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: 4px;
       text-align: center;
     }}
@@ -2219,6 +2219,7 @@ def render_report_html(report: Dict[str, Any]) -> str:
       flex-direction: column;
       align-items: center;
       justify-content: flex-start;
+      min-width: 0;
       padding-top: 4px;
       border-radius: 6px;
       border: 1px solid transparent;
@@ -2262,25 +2263,6 @@ def render_report_html(report: Dict[str, Any]) -> str:
       font-weight: 600;
       line-height: 1.2;
       z-index: 2;
-    }}
-
-    .cal-count {{
-      margin-top: 2px;
-      font-size: 0.65rem;
-      line-height: 1.1;
-      display: grid;
-      gap: 1px;
-      z-index: 2;
-    }}
-
-    .cal-count .count-total {{
-      font-weight: 700;
-      color: var(--text-main);
-    }}
-
-    .cal-count .count-issues {{
-      font-weight: 600;
-      color: #b45309;
     }}
 
     .cal-dots-row {{
@@ -2454,24 +2436,12 @@ def render_report_html(report: Dict[str, Any]) -> str:
       gap: 0.25rem;
     }}
 
-    @media (max-width: 768px) {{
-      #calendar-collapse-toggle {{
-        display: inline-flex;
-      }}
-
-      #calendar-card.is-collapsed .calendar-wrapper {{
-        display: none;
-      }}
-
-      #calendar-card.is-collapsed .calendar-events {{
-        display: none;
-      }}
+    #calendar-collapse-toggle {{
+      display: inline-flex;
     }}
 
-    @media (min-width: 769px) {{
-      #calendar-collapse-toggle {{
-        display: none;
-      }}
+    #calendar-card.is-collapsed #calendar-body {{
+      display: none;
     }}
 
     .cal-pill {{
@@ -2583,51 +2553,53 @@ def render_report_html(report: Dict[str, Any]) -> str:
               <button class="btn btn-ghost btn-xs" id="calendar-collapse-toggle" type="button" aria-expanded="true">Collapse</button>
             </div>
 
-            <div class="calendar-controls mt-2">
-              <div class="calendar-controls-row">
-                <button class="btn btn-xs btn-outline" id="calendar-jump-today" type="button">Jump to today</button>
-                <button class="btn btn-xs btn-outline" id="calendar-jump-issue" type="button">Jump to next issue</button>
-                <button class="btn btn-xs btn-ghost" id="calendar-view-toggle" type="button">Month</button>
+            <div id="calendar-body">
+              <div class="calendar-controls mt-2">
+                <div class="calendar-controls-row">
+                  <button class="btn btn-xs btn-outline" id="calendar-jump-today" type="button">Jump to today</button>
+                  <button class="btn btn-xs btn-outline" id="calendar-jump-issue" type="button">Jump to next issue</button>
+                  <button class="btn btn-xs btn-ghost" id="calendar-view-toggle" type="button">Month</button>
+                </div>
+                <div class="calendar-controls-row">
+                  <label class="calendar-toggle">
+                    <input type="checkbox" class="checkbox checkbox-xs" id="calendar-issues-only" />
+                    <span>Issues only</span>
+                  </label>
+                  <label class="calendar-toggle">
+                    <input type="checkbox" class="checkbox checkbox-xs" id="calendar-search-toggle" checked />
+                    <span>Search affects calendar</span>
+                  </label>
+                </div>
               </div>
-              <div class="calendar-controls-row">
-                <label class="calendar-toggle">
-                  <input type="checkbox" class="checkbox checkbox-xs" id="calendar-issues-only" />
-                  <span>Issues only</span>
-                </label>
-                <label class="calendar-toggle">
-                  <input type="checkbox" class="checkbox checkbox-xs" id="calendar-search-toggle" checked />
-                  <span>Search affects calendar</span>
-                </label>
-              </div>
-            </div>
 
-            <div class="calendar-wrapper">
-              <div class="custom-calendar-card bg-base-100 border border-base-300 shadow-lg rounded-box p-4">
-                <div class="cal-top-bar mb-4 flex justify-between items-center">
-                  <span class="text-lg font-bold tracking-tight" id="calendar-month-label">Month</span>
-                  <div class="flex gap-1">
-                    <select id="calendar-month-select" class="select select-xs select-bordered" aria-label="Jump to month"></select>
-                    <button class="btn btn-xs btn-ghost btn-square" id="calendar-prev" type="button" aria-label="Previous month">◀</button>
-                    <button class="btn btn-xs btn-ghost btn-square" id="calendar-next" type="button" aria-label="Next month">▶</button>
+              <div class="calendar-wrapper">
+                <div class="custom-calendar-card bg-base-100 border border-base-300 shadow-lg rounded-box p-4">
+                  <div class="cal-top-bar mb-4 flex justify-between items-center">
+                    <span class="text-lg font-bold tracking-tight" id="calendar-month-label">Month</span>
+                    <div class="flex gap-1">
+                      <select id="calendar-month-select" class="select select-xs select-bordered" aria-label="Jump to month"></select>
+                      <button class="btn btn-xs btn-ghost btn-square" id="calendar-prev" type="button" aria-label="Previous month">◀</button>
+                      <button class="btn btn-xs btn-ghost btn-square" id="calendar-next" type="button" aria-label="Next month">▶</button>
+                    </div>
                   </div>
+                  <div class="cal-grid" id="calendar-grid"></div>
                 </div>
-                <div class="cal-grid" id="calendar-grid"></div>
+
+                <div class="calendar-events mt-2">
+                  <div class="calendar-events-header" id="calendar-events-title">Events</div>
+                  <div class="cal-events-list" id="calendar-events-list">
+                    {calendar_pills_html}
+                  </div>
+                  <div class="calendar-empty" id="calendar-events-empty">No events on this date.</div>
+                </div>
               </div>
 
-              <div class="calendar-events mt-2">
-                <div class="calendar-events-header" id="calendar-events-title">Events</div>
-                <div class="cal-events-list" id="calendar-events-list">
-                  {calendar_pills_html}
-                </div>
-                <div class="calendar-empty" id="calendar-events-empty">No events on this date.</div>
+              <div class="calendar-agenda mt-4" id="calendar-agenda">
+                <div class="calendar-events-header">Agenda</div>
+                <div class="calendar-agenda-summary" id="calendar-agenda-summary"></div>
+                <div class="calendar-agenda-list" id="calendar-agenda-list"></div>
+                <div class="calendar-empty" id="calendar-agenda-empty">No items for this date.</div>
               </div>
-            </div>
-
-            <div class="calendar-agenda mt-4" id="calendar-agenda">
-              <div class="calendar-events-header">Agenda</div>
-              <div class="calendar-agenda-summary" id="calendar-agenda-summary"></div>
-              <div class="calendar-agenda-list" id="calendar-agenda-list"></div>
-              <div class="calendar-empty" id="calendar-agenda-empty">No items for this date.</div>
             </div>
           </div>
         </div>
@@ -3407,12 +3379,6 @@ def render_report_html(report: Dict[str, Any]) -> str:
         const info = calendarModel.byDate.get(dateIso);
         if (info && info.total > 0) {{
           cell.classList.add(getHeatClass(info.issues));
-          const count = document.createElement("div");
-          count.className = "cal-count";
-          const issueLabel = `${{info.missing}}M ${{info.check}}C`;
-          count.innerHTML = `<span class="count-total">${{info.total}}</span><span class="count-issues">${{issueLabel}}</span>`;
-          cell.appendChild(count);
-
           const dotsRow = document.createElement("div");
           dotsRow.className = "cal-dots-row";
           if (info.groupSlugs && info.groupSlugs.size) {{

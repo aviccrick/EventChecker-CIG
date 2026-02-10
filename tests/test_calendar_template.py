@@ -14,7 +14,6 @@ class TestCalendarTemplate(unittest.TestCase):
         self.assertIn("data-date=\"", content)
         self.assertIn("calendarModel", content)
         self.assertIn("renderCalendar", content)
-        self.assertIn("cal-count", content)
         self.assertIn("heat-", content)
         self.assertIn("calendar-tooltip", content)
         self.assertIn("calendar-agenda-list", content)
@@ -34,6 +33,10 @@ class TestCalendarTemplate(unittest.TestCase):
         self.assertIn("cal-dots-row", content)
         self.assertIn("weekdayHeaders", content)
 
+    def test_calendar_no_counts(self):
+        content = Path("checker.py").read_text(encoding="utf-8")
+        self.assertNotIn("cal-count", content)
+
     def test_calendar_group_slug_model(self):
         content = Path("checker.py").read_text(encoding="utf-8")
         self.assertIn("groupSlug", content)
@@ -48,6 +51,11 @@ class TestCalendarTemplate(unittest.TestCase):
         content = Path("checker.py").read_text(encoding="utf-8")
         self.assertNotIn("Copy", content)
         self.assertNotIn("navigator.clipboard", content)
+
+    def test_calendar_collapse_all_sizes(self):
+        content = Path("checker.py").read_text(encoding="utf-8")
+        self.assertIn("calendar-body", content)
+        self.assertIn("is-collapsed", content)
 
 
 if __name__ == "__main__":
