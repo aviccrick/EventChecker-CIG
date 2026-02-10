@@ -1532,9 +1532,10 @@ def render_report_html(report: Dict[str, Any]) -> str:
     group_html_parts = []
     group_nav_items = []
     for idx, g in enumerate(groups):
-        g_name = html_escape(g.get("display", ""))
+        g_name_raw = str(g.get("display", ""))
+        g_name = html_escape(g_name_raw)
         g_url = html_escape(g.get("url", ""))
-        slug = group_slug(g.get("display", ""))
+        slug = group_slug(g_name_raw)
         sections = g.get("sections", [])
 
         # Detailed Counts with Tooltips
@@ -1676,7 +1677,7 @@ def render_report_html(report: Dict[str, Any]) -> str:
                 detail_parts = []
                 if any_mismatch:
                     if missing_list:
-                        mailto_missing = generate_mailto(g_name, missing_list, date_uk)
+                mailto_missing = generate_mailto(g_name_raw, missing_list, date_uk)
                         detail_parts.append(f"""
                           <div class="mt-3 detail-block p-3 bg-red-50 rounded-lg border border-red-100" data-detail="missing">
                             <div class="flex justify-between items-start">
@@ -1733,7 +1734,7 @@ def render_report_html(report: Dict[str, Any]) -> str:
                         """)
 
                 group_html_parts.append(f"""
-                  <div id="{html_escape(section_anchor(g.get("display", ""), s.get("date_iso", ""), s.get("category", "")))}" class="{box_class} date-card" data-group="{slug}" data-category="{html_escape(category_raw).lower()}" data-date="{html_escape(date_iso)}" data-group-label="{html_escape(g_name)}" data-group-url="{html_escape(g_url)}">
+                  <div id="{html_escape(section_anchor(g.get("display", ""), s.get("date_iso", ""), s.get("category", "")))}" class="{box_class} date-card" data-group="{slug}" data-group-slug="{slug}" data-category="{html_escape(category_raw).lower()}" data-date="{html_escape(date_iso)}" data-group-label="{html_escape(g_name_raw)}" data-group-url="{html_escape(g_url)}">
                     <div class="flex flex-row items-start gap-4 mb-3">
                       <div class="flex-none w-16 text-center pt-1">
                          {date_cell_parts(date_iso, date_uk)}
@@ -3174,17 +3175,18 @@ def render_report_html(report: Dict[str, Any]) -> str:
     }};
 
     function blankDateInfo() {{
-      return {{
-        total: 0,
-        ok: 0,
-        missing: 0,
-        check: 0,
-        extra: 0,
-        dateMismatch: 0,
-        issues: 0,
-        groups: new Map(),
-        agenda: [],
-      }};
+        return {{
+          total: 0,
+          ok: 0,
+          missing: 0,
+          check: 0,
+          extra: 0,
+          dateMismatch: 0,
+          issues: 0,
+          groups: new Map(),
+          groupSlugs: new Set(),
+          agenda: [],
+        }};
     }}
 
     function addGroupIssue(info, groupLabel) {{
@@ -3208,6 +3210,7 @@ def render_report_html(report: Dict[str, Any]) -> str:
         const dateIso = card.getAttribute("data-date") || "";
         if (!dateIso) return;
         const groupLabel = card.getAttribute("data-group-label") || card.getAttribute("data-group") || "Group";
+        const groupSlug = card.getAttribute("data-group-slug") || card.getAttribute("data-group") || "";
         const groupUrl = card.getAttribute("data-group-url") || "";
         const category = card.getAttribute("data-category") || "";
         const anchor = card.getAttribute("id") || "";
@@ -3235,6 +3238,9 @@ def render_report_html(report: Dict[str, Any]) -> str:
             info = blankDateInfo();
             model.byDate.set(dateIso, info);
           }}
+          if (groupSlug) {{
+            info.groupSlugs.add(groupSlug);
+          }}
 
           info.total += 1;
           if (status === "ok") {{
@@ -3258,6 +3264,7 @@ def render_report_html(report: Dict[str, Any]) -> str:
             status,
             title,
             groupLabel,
+            groupSlug,
             groupUrl,
             category,
             anchor,
@@ -3400,6 +3407,13 @@ def render_report_html(report: Dict[str, Any]) -> str:
 
           const dotsRow = document.createElement("div");
           dotsRow.className = "cal-dots-row";
+          if (info.groupSlugs && info.groupSlugs.size) {{
+            Array.from(info.groupSlugs).forEach((slug) => {{
+              const dot = document.createElement("span");
+              dot.className = `cal-grid-dot group-${{slug}}`;
+              dotsRow.appendChild(dot);
+            }});
+          }}
           cell.appendChild(dotsRow);
 
           const tooltip = document.createElement("div");

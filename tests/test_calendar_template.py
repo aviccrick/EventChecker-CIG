@@ -34,6 +34,11 @@ class TestCalendarTemplate(unittest.TestCase):
         self.assertIn("cal-dots-row", content)
         self.assertIn("weekdayHeaders", content)
 
+    def test_calendar_group_slug_model(self):
+        content = Path("checker.py").read_text(encoding="utf-8")
+        self.assertIn("groupSlug", content)
+        self.assertIn("groupSlugs", content)
+
 
 if __name__ == "__main__":
     unittest.main()
