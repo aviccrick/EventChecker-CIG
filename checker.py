@@ -2200,7 +2200,7 @@ def render_report_html(report: Dict[str, Any]) -> str:
 
     .cal-grid {{
       display: grid;
-      grid-template-columns: repeat(7, 1fr);
+      grid-template-columns: repeat(5, 1fr);
       gap: 4px;
       text-align: center;
     }}
@@ -3314,8 +3314,8 @@ def render_report_html(report: Dict[str, Any]) -> str:
       if (!calendarGrid) return;
       calendarGrid.innerHTML = "";
 
-      const headers = ["M", "T", "W", "T", "F", "S", "S"];
-      headers.forEach((label) => {{
+      const weekdayHeaders = ["M", "T", "W", "T", "F"];
+      weekdayHeaders.forEach((label) => {{
         const cell = document.createElement("div");
         cell.className = "cal-header";
         cell.textContent = label;
@@ -3397,6 +3397,10 @@ def render_report_html(report: Dict[str, Any]) -> str:
           const issueLabel = `${{info.missing}}M ${{info.check}}C`;
           count.innerHTML = `<span class="count-total">${{info.total}}</span><span class="count-issues">${{issueLabel}}</span>`;
           cell.appendChild(count);
+
+          const dotsRow = document.createElement("div");
+          dotsRow.className = "cal-dots-row";
+          cell.appendChild(dotsRow);
 
           const tooltip = document.createElement("div");
           tooltip.className = "calendar-tooltip";

@@ -28,6 +28,12 @@ class TestCalendarTemplate(unittest.TestCase):
         self.assertIn("group=", content)
         self.assertIn("status=", content)
 
+    def test_calendar_weekday_grid_and_dots(self):
+        content = Path("checker.py").read_text(encoding="utf-8")
+        self.assertIn("repeat(5,", content)
+        self.assertIn("cal-dots-row", content)
+        self.assertIn("weekdayHeaders", content)
+
 
 if __name__ == "__main__":
     unittest.main()
