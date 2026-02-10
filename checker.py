@@ -3565,23 +3565,10 @@ def render_report_html(report: Dict[str, Any]) -> str:
         const actions = document.createElement("div");
         actions.className = "agenda-actions";
 
-        const copyBtn = document.createElement("button");
-        copyBtn.type = "button";
-        copyBtn.className = "btn btn-xs btn-ghost";
-        copyBtn.textContent = "Copy";
-        copyBtn.addEventListener("click", () => {{
-          const text = ` ${{item.title}} (${{item.groupLabel || "Group"}}) - ${{statusLabel}}`;
-          if (navigator.clipboard && navigator.clipboard.writeText) {{
-            navigator.clipboard.writeText(text);
-          }}
-        }});
-
         const openLink = document.createElement("a");
         openLink.className = "btn btn-xs btn-ghost";
         openLink.textContent = "Open";
         openLink.href = item.anchor ? `#${{item.anchor}}` : "#";
-
-        actions.appendChild(copyBtn);
         actions.appendChild(openLink);
 
         if (item.groupUrl) {{
@@ -3634,7 +3621,6 @@ def render_report_html(report: Dict[str, Any]) -> str:
       }} else {{
         setSelection([dateIso], dateIso);
       }}
-      scrollToDate(dateIso);
     }}
 
     function scrollToDate(dateIso) {{

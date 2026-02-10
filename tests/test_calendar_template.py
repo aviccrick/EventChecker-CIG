@@ -44,6 +44,11 @@ class TestCalendarTemplate(unittest.TestCase):
         self.assertIn("isWeekend", content)
         self.assertIn("skipWeekend", content)
 
+    def test_calendar_no_copy_action(self):
+        content = Path("checker.py").read_text(encoding="utf-8")
+        self.assertNotIn("Copy", content)
+        self.assertNotIn("navigator.clipboard", content)
+
 
 if __name__ == "__main__":
     unittest.main()
