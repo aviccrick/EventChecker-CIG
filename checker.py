@@ -1677,7 +1677,7 @@ def render_report_html(report: Dict[str, Any]) -> str:
                 detail_parts = []
                 if any_mismatch:
                     if missing_list:
-                mailto_missing = generate_mailto(g_name_raw, missing_list, date_uk)
+                        mailto_missing = generate_mailto(g_name_raw, missing_list, date_uk)
                         detail_parts.append(f"""
                           <div class="mt-3 detail-block p-3 bg-red-50 rounded-lg border border-red-100" data-detail="missing">
                             <div class="flex justify-between items-start">
