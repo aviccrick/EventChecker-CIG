@@ -2547,7 +2547,7 @@ def render_report_html(report: Dict[str, Any]) -> str:
     </div>
   </nav>
 
-  <div class="max-w-7xl mx-auto p-4 md:p-8">
+  <div class="max-w-7xl mx-auto px-2.5 py-4 md:py-8">
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
       <div class="stat-box bg-white p-4 rounded-lg shadow-sm border border-slate-100">
         <div class="text-xs uppercase font-bold text-slate-400">Report Generated</div>
@@ -3290,8 +3290,8 @@ def render_report_html(report: Dict[str, Any]) -> str:
       const topGroups = Array.from(info.groups.entries())
         .sort((a, b) => b[1] - a[1])
         .slice(0, 2)
-        .map(([name, count]) => `${{name}} (${count})`);
-      const summary = `OK ${info.ok} / Missing ${info.missing} / Check ${info.check} / Extra ${info.extra}`;
+        .map(([name, count]) => `${{name}} (${{count}})`);
+      const summary = `OK ${{info.ok}} / Missing ${{info.missing}} / Check ${{info.check}} / Extra ${{info.extra}}`;
       if (!topGroups.length) return summary;
       return `${{summary}} · Top: ${{topGroups.join(", ")}}`;
     }}
@@ -3528,7 +3528,7 @@ def render_report_html(report: Dict[str, Any]) -> str:
         copyBtn.className = "btn btn-xs btn-ghost";
         copyBtn.textContent = "Copy";
         copyBtn.addEventListener("click", () => {{
-          const text = `${{item.title}} (${item.groupLabel || "Group"}) - ${{statusLabel}}`;
+          const text = ` ${{item.title}} (${{item.groupLabel || "Group"}}) - ${{statusLabel}}`;
           if (navigator.clipboard && navigator.clipboard.writeText) {{
             navigator.clipboard.writeText(text);
           }}

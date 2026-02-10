@@ -172,7 +172,7 @@ def inject_toolbar(report_html: str) -> str:
 
     html = report_html
     toolbar = build_toolbar_html()
-    marker = '<div class="max-w-7xl mx-auto p-4 md:p-8">'
+    marker = '<div class="max-w-7xl mx-auto px-2.5 py-4 md:py-8">'
     if marker in html:
         html = html.replace(marker, marker + "\n" + toolbar, 1)
     else:
@@ -264,7 +264,7 @@ def render_empty_page() -> str:
       <span class=\"text-xl font-bold tracking-tight\" style=\"color: var(--col-blue)\">CrickNet Checker</span>
     </div>
   </nav>
-  <div class=\"max-w-7xl mx-auto p-4 md:p-8\">
+  <div class=\"max-w-7xl mx-auto px-2.5 py-4 md:py-8\">
     {toolbar}
     <div class=\"card bg-base-100 shadow\">
       <div class=\"card-body\">

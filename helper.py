@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -27,6 +28,7 @@ STATE = HelperState()
 STATE_LOCK = threading.Lock()
 STOP_EVENT = threading.Event()
 LAST_REFRESH_AT: Optional[datetime] = None
+SERVERS: list[ThreadingHTTPServer] = []
 
 
 def isoformat_or_none(dt: Optional[datetime]) -> Optional[str]:
@@ -91,6 +93,50 @@ def scheduler_loop() -> None:
         time.sleep(5)
 
 
+class IPv6ThreadingHTTPServer(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+
+    def server_bind(self) -> None:
+        try:
+            self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        except (AttributeError, OSError):
+            pass
+        super().server_bind()
+
+
+def can_bind_ipv6() -> bool:
+    try:
+        server = IPv6ThreadingHTTPServer(("::1", 0), Handler)
+    except OSError:
+        return False
+    server.server_close()
+    return True
+
+
+def build_servers(
+    port: int = 8765,
+    server_factory=ThreadingHTTPServer,
+    ipv6_server_factory=IPv6ThreadingHTTPServer,
+    ipv6_enabled: Optional[bool] = None,
+) -> list[ThreadingHTTPServer]:
+    servers: list[ThreadingHTTPServer] = []
+    servers.append(server_factory(("127.0.0.1", port), Handler))
+    enable_ipv6 = ipv6_enabled if ipv6_enabled is not None else can_bind_ipv6()
+    if enable_ipv6:
+        try:
+            servers.append(ipv6_server_factory(("::1", port), Handler))
+        except OSError:
+            if ipv6_enabled:
+                raise
+    return servers
+
+
+def shutdown_all_servers() -> None:
+    STOP_EVENT.set()
+    for server in list(SERVERS):
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, status: int, body: str, content_type: str = "text/html") -> None:
         self.send_response(status)
@@ -141,8 +187,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/shutdown":
             self._send(200, json.dumps({"ok": True}), "application/json")
-            STOP_EVENT.set()
-            threading.Thread(target=self.server.shutdown, daemon=True).start()
+            shutdown_all_servers()
             return
         self._send(404, "Not found")
 
@@ -160,8 +205,17 @@ def main() -> None:
         )
 
     threading.Thread(target=scheduler_loop, daemon=True).start()
-    server = ThreadingHTTPServer(("127.0.0.1", 8765), Handler)
-    server.serve_forever()
+    global SERVERS
+    SERVERS = build_servers(8765)
+    primary = next(
+        (server for server in SERVERS if server.address_family == socket.AF_INET),
+        SERVERS[0],
+    )
+    for server in SERVERS:
+        if server is primary:
+            continue
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    primary.serve_forever()
 
 
 if __name__ == "__main__":
