@@ -67,8 +67,8 @@ class CalendarReportTests(unittest.TestCase):
         self.assertIn('id="calendar-grid"', html)
         self.assertIn('id="calendar-events-list"', html)
         self.assertIn('id="calendar-events-empty"', html)
-        self.assertIn('filterDate(todayStr)', html)
-        self.assertIn('renderCalendarMonth()', html)
+        self.assertIn('window.filterDate', html)
+        self.assertIn('function renderCalendar()', html)
 
 
 if __name__ == "__main__":
